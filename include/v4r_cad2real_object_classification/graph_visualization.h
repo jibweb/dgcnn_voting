@@ -167,7 +167,7 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
     std::vector<Eigen::Matrix3f> lrf_transforms_vec;
     std::vector<float> scales;
     std::vector<Eigen::Vector3f> means;
-    std::vector<std::vector<std::pair<uint, int> > > support_regions;
+    std::vector<std::vector<int> > support_regions;
     (user_data->graph)->sampleSupportPoints(support_points, neighbor_indices, lrf_transforms_vec, scales, means, support_regions,
                                             user_data->neigh_size, user_data->max_support_point, user_data->neighbors_nb, seed);
 
@@ -217,11 +217,11 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
     // --- Add colored point cloud (based on grown regions) ------------------------------------------------------
     std::vector<std::vector<std::pair<uint, float> > > ownership(pc_->points.size());
     for (uint support_pt_idx=0; support_pt_idx < support_regions.size(); support_pt_idx++) {
-      float max_depth = static_cast<float>(support_regions[support_pt_idx][support_regions[support_pt_idx].size() - 1].second);
+      // float max_depth = static_cast<float>(support_regions[support_pt_idx][support_regions[support_pt_idx].size() - 1].second);
 
       for (auto p : support_regions[support_pt_idx]) {
-        auto p_own = std::make_pair(support_pt_idx, 1. - static_cast<float>(p.second) / max_depth);
-        ownership[p.first].push_back(p_own);
+        auto p_own = std::make_pair(support_pt_idx, 1.);
+        ownership[p].push_back(p_own);
       }
     }
 

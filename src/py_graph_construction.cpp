@@ -377,7 +377,7 @@ int GraphConstructor::sampleSupportPointsAndRegions(float* support_points_coords
   std::vector<Eigen::Matrix3f> lrf_transforms_vec;
   std::vector<float> scales_vec;
   std::vector<Eigen::Vector3f> means_vec;
-  std::vector<std::vector<std::pair<uint, int> > > support_regions;
+  std::vector<std::vector<int> > support_regions;
 
   sampleSupportPoints(support_points, neighbor_indices, lrf_transforms_vec, scales_vec, means_vec, support_regions,
                       neigh_size, max_support_point, neighbors_nb, seed);
@@ -417,7 +417,7 @@ int GraphConstructor::sampleSupportPointsAndRegions(float* support_points_coords
 
       for (uint feat_idx=0; feat_idx < region_sample_size; feat_idx++) {
         uint rand_idx = rand() % support_regions[support_pt_idx].size();
-        uint pt_idx = support_regions[support_pt_idx][rand_idx].first;
+        uint pt_idx = support_regions[support_pt_idx][rand_idx];
         Eigen::Vector3f centered_coords = pc_->points[pt_idx].getVector3fMap() - means_vec[support_pt_idx];
         // Eigen::Vector3f centered_coords = pc_->points[pt_idx].getVector3fMap() - support_center;
 
@@ -675,7 +675,7 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
                                           std::vector<Eigen::Matrix3f> & lrf_transforms,
                                           std::vector<float> & scales,
                                           std::vector<Eigen::Vector3f> & means,
-                                          std::vector<std::vector<std::pair<uint, int> > > & support_regions,
+                                          std::vector<std::vector<int> > & support_regions,
                                           float neigh_size, int max_support_point, uint neighbors_nb, int seed) {
 
   //Pre-allocate memory
@@ -764,42 +764,11 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
     if (supervoxels_indices[voxel_idx]->size() <= 3)
       continue;
 
-    // std::cout << "Voxel " << voxel_idx << " with size " << supervoxels_indices[voxel_idx]->size() << std::endl;
-
-    pcl::PCA<PointT> pca;
-    pca.setInputCloud(pc_);
-    pca.setIndices(supervoxels_indices[voxel_idx]);
-
-    // Column ordered eigenvectors, representing the eigenspace cartesian basis (right-handed coordinate system).
-    Eigen::Matrix3f lrf = pca.getEigenVectors().transpose();
-    supervoxels_centers[voxel_idx] = pca.getMean().head<3>();
-
-    //   Eigen::Vector3f eigenvalues = pca.getEigenValues();
-
-    //   std::cout << eigenvalues(2) / eigenvalues.sum() << " | " << lrf.row(2).dot(voxels_normals[voxel_idx]) << " | " << convexity_bels[voxel_idx] << std::endl;
-
-    //   float signed_curv = lrf.row(2).dot(voxels_normals[voxel_idx]) / abs(lrf.row(2).dot(voxels_normals[voxel_idx]));
-    //   signed_curv *= eigenvalues(2) / eigenvalues.sum();
-    //   convexity_bels[voxel_idx] = signed_curv;
-    // }
-
-    // Align with normals
-    uint sampled_nb = std::min<uint>(static_cast<uint>(100), supervoxels_indices[voxel_idx]->size());
-    uint plusNormals = 0;
-
-    for (uint i=0; i<sampled_nb; i++) {
-      uint pt_idx = (*(supervoxels_indices[voxel_idx]))[i];
-      Eigen::Vector3f n = pc_->points[pt_idx].getNormalVector3fMap();
-
-      if (n.dot(lrf.row(2)) > 0.)
-        plusNormals++;
-    }
-
-    // If less than half aligns, flip the LRF
-    if (2*plusNormals < sampled_nb)
-      supervoxels_normals[voxel_idx] = -lrf.row(2);
-    else
-      supervoxels_normals[voxel_idx] = lrf.row(2);
+    Eigen::Vector3f mean;
+    Eigen::Matrix3f lrf;
+    normalAlignedPca(supervoxels_indices[voxel_idx], lrf, mean);
+    supervoxels_centers[voxel_idx] = mean;
+    supervoxels_normals[voxel_idx] = lrf.row(2);
   }
 
 
@@ -822,23 +791,6 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
     concavity_bels[voxel_idx] /= norm;
     convexity_bels[voxel_idx] /= norm;
   }
-
-  // // Update the properties of the graph
-  // lrf.row(1).matrix () = lrf.row(2).cross (lrf.row(0));
-
-
-  // Eigen::Vector3f z(0.f, 0.f, 1.f);
-  // Eigen::Matrix3f zlrf = Eigen::Matrix3f::Identity();
-  // Eigen::Vector3f node_normal = lrf.row(2);
-  // node_normal(2) = 0.f;
-  // node_normal.normalize();
-  // if (std::isnan(node_normal(0)))
-  //   node_normal << 1., 0., 0.;
-  // zlrf.row(0) = node_normal;
-  // zlrf.row(1) = z.cross(node_normal);
-  // zlrf.row(2) = z;
-
-
 } // -- end ScopeTime t("Convexity", debug_);
 
 
@@ -854,7 +806,7 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
   std::vector<bool> is_processed(voxel_num, false);
   double convexity_conf;
 
-  // voxels added to one on the clusters cannot be sampled anymore. Maybe randomize the order of voxels
+  // Maybe randomize the order of voxels
   // convexity average convexity instead ? Merge neighboring segment with similar average convexity ?
   // remove the acos
   // look at overlap
@@ -877,7 +829,6 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
       uint supervoxel_idx = queue.front();
       queue.pop_front();
 
-      // voxel_to_merged_voxel[supervoxel_idx] = voxel_idx;
       segment.push_back(supervoxel_idx);
 
       for (auto neigh_idx : supervoxels_adjacency[supervoxel_idx]) {
@@ -930,11 +881,6 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
     segments_to_supervoxels.push_back(std::move(segment));
 
   }
-
-  // for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++) {
-  //   pt_merged_voxel_indices[pt_idx] = voxel_to_merged_voxel[pt_supervoxel_indices[pt_idx]];
-  // }
-
 } // -- end ScopeTime t("Segment Merging", debug_);
 
 
@@ -985,14 +931,13 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
     std::cout << "Segment " << seg_idx << " nb supervoxels " << segments_to_supervoxels[seg_idx].size() << " np points " << region_grown.size() << std::endl;
 
     // --- Get LRF from the region of interest -------------------------------------------------------------------
-    // auto lrf_pair = computeNormalAlignedPcaLrf(region_grown);
     Eigen::Matrix3f lrf;
     Eigen::Vector3f mean;
     normalAlignedPca(indices, lrf, mean);
     lrf_transforms.push_back(lrf);
     means.push_back(mean);
-    scales.push_back(regionScale(region_grown, mean));
-    support_regions.push_back(std::move(region_grown));
+    scales.push_back(regionScale(indices, mean));
+    support_regions.push_back(std::move(*indices));
   }
 
 
@@ -1099,249 +1044,6 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
   // }
 
 
-
-
-
-
-
-  // -------------------------------------------------------------------------------------------------------------
-
-  // -------------------------------------------------------------------------------------------------------------
-
-  // -------------------------------------------------------------------------------------------------------------
-
-  // -------------------------------------------------------------------------------------------------------------
-
-
-
-
-
-
-  // ScopeTime t("Support points sampling", debug_);
-
-  // //Pre-allocate memory
-  // support_points.reserve(max_support_point);
-  // lrf_transforms.reserve(max_support_point);
-  // scales.reserve(max_support_point);
-  // means.reserve(max_support_point);
-  // support_regions.reserve(max_support_point);
-
-  // // Bookkeping vectors
-  // std::vector<bool> is_support(pc_->points.size(), false);
-  // std::vector<double> sample_prob(pc_->points.size(), 1.);
-  // double sample_prob_sum = static_cast<double> (pc_->points.size());
-
-  // std::unordered_set<uint> samplable_neighborhood;
-
-  // // Try sampling points a fixed number of times (might stop before if the neighborhood growing criterion is big)
-  // for (uint support_pt_idx=0; support_pt_idx < max_support_point; support_pt_idx++) {
-  //   // --- Sample the starting point -----------------------------------------------------------------------------
-  //   // If there isn't enough remaining points, stop sampling
-  //   if (sample_prob_sum < 1e-2)
-  //     break;
-
-  //   int sampled_idx = pc_->points.size();
-
-  //   if (samplable_neighborhood.size() != 0) {
-  //     double neigh_prob_sum = 0.;
-  //     for (auto i : samplable_neighborhood)
-  //       neigh_prob_sum += sample_prob[i];
-
-  //     if (neigh_prob_sum > 1e-2) {
-  //       double rdn_weight = static_cast <double> (rand()) / (static_cast <double> (RAND_MAX/neigh_prob_sum));
-
-  //       for (auto prob_idx : samplable_neighborhood) {
-  //         rdn_weight -= sample_prob[prob_idx];
-
-  //         if (rdn_weight <= 0) {
-  //           sampled_idx = prob_idx;
-  //           break;
-  //         }
-  //       }
-  //     }
-  //   }
-
-  //   // If we didn't sample something from the neighborhood, look at the whole point cloud
-  //   if (sampled_idx == pc_->points.size()) {
-  //     samplable_neighborhood.clear();
-
-  //     sample_prob_sum = 0.;
-  //     for (auto p_i : sample_prob)
-  //       sample_prob_sum += p_i;
-
-  //     double rdn_weight = static_cast <double> (rand()) / (static_cast <double> (RAND_MAX/sample_prob_sum));
-
-  //     for (uint prob_idx=0; prob_idx < pc_->points.size(); prob_idx++) {
-  //       rdn_weight -= sample_prob[prob_idx];
-
-  //       if (rdn_weight <= 0) {
-  //         sampled_idx = prob_idx;
-  //         break;
-  //       }
-  //     }
-  //   }
-
-  //   // Check if we did sample something
-  //   if (sampled_idx != pc_->points.size()) {
-  //     sample_prob[sampled_idx] = 0.;
-
-  //     // Only consider support points that have neighbors
-  //     if (adj_list_[sampled_idx].size() == 0) {
-  //       support_pt_idx--;
-  //       continue;
-  //     }
-
-  //     is_support[sampled_idx] = true;
-  //     support_points.push_back(sampled_idx);
-  //   } else {
-  //     break;
-  //   }
-
-
-  //   // --- BFS to grow the region of interest --------------------------------------------------------------------
-  //   std::vector<std::pair<uint, int> > region_grown;
-  //   region_grown.reserve(50);
-  //   bool finished_sampling = angleBasedBFS(sampled_idx, neigh_size, region_grown, sample_prob);
-  //   // bool finished_sampling = convexityBasedBFS(sampled_idx, neigh_size, region_grown);
-
-  //   // Only consider support points that have enough neighbors to compute its PCA
-  //   if (region_grown.size() < 30) {
-  //     is_support[sampled_idx] = false;
-  //     support_points.pop_back();
-  //     support_pt_idx--;
-  //     continue;
-  //   }
-
-  //   // --- Get LRF from the region of interest -------------------------------------------------------------------
-  //   auto lrf_pair = computeNormalAlignedPcaLrf(region_grown);
-  //   means.push_back(lrf_pair.second);
-  //   scales.push_back(regionScale(sampled_idx, region_grown, lrf_pair.second));
-  //   lrf_transforms.push_back(lrf_pair.first);
-
-  //   // --- Updating the sample probability based on the extracted region -----------------------------------------
-  //   int max_depth = region_grown[region_grown.size() - 1].second;
-  //   // std::vector<double> factors = compute_factors(max_depth, beta_23);
-  //   // for (auto p : region_grown)
-  //   //   sample_prob[p.first] *= factors[p.second];
-
-  //   for (uint i=region_grown.size()-1; i>0; i--) {
-  //     if (finished_sampling && region_grown[i].second >= max_depth-1) {
-  //       if(sample_prob[region_grown[i].first] > 0.)
-  //         samplable_neighborhood.insert(region_grown[i].first);
-
-  //     } else {
-  //       sample_prob[region_grown[i].first] = 0.;
-  //     }
-  //   }
-
-  //   support_regions.push_back(std::move(region_grown));
-
-  // } // --- for support_pt_idx (outer loop)
-
-  // // --- Get neighbors for each support points -------------------------------------------------------------------
-  // neighbor_indices.resize(support_points.size());
-
-  // std::unordered_map<uint, uint> pc_to_support_indices;
-  // for (uint support_pt_idx=0; support_pt_idx<support_points.size(); support_pt_idx++)
-  //   pc_to_support_indices[support_points[support_pt_idx]] = support_pt_idx;
-
-  // for (uint i=0; i<support_points.size(); i++) {
-  //   uint support_pt_idx = support_points[i];
-  //   uint part_idx = pc_to_support_indices[support_pt_idx];
-  //   for (auto p : support_regions[i]) {
-  //     if (is_support[p.first] && support_pt_idx != p.first)
-  //       neighbor_indices[i].push_back(pc_to_support_indices[p.first]);
-  //   }
-  // }
-
-  // bool knn_connectivity = true;
-  // if (knn_connectivity) {
-  // // {
-  //   ScopeTime t1("kNN Connectivity", debug_);
-  //   uint sample_per_region = 100;
-
-  //   pcl::PointCloud<PointT>::Ptr parts_cloud(new pcl::PointCloud<PointT>);
-  //   parts_cloud->points.reserve(support_regions.size()*sample_per_region);
-
-  //   for (auto region_grown : support_regions)
-  //     for (uint i=0; i < 100; i++) {
-  //       uint rand_idx = rand() % region_grown.size();
-  //       parts_cloud->points.push_back(pc_->points[region_grown[rand_idx].first]);
-  //     }
-
-  //   pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
-  //   tree->setInputCloud(parts_cloud);
-
-  //   std::vector<int> k_indices;
-  //   std::vector<float> k_sqr_distances;
-
-  //   for (uint i=0; i < support_points.size(); i++) {
-  //     PointT p;
-  //     p.x = means[i](0);
-  //     p.y = means[i](1);
-  //     p.z = means[i](2);
-
-  //     tree->radiusSearch(p, 1. / scales[i], k_indices, k_sqr_distances);
-  //     std::vector<bool> is_neighbor(support_points.size(), false);
-  //     for (auto neigh_idx : neighbor_indices[i])
-  //       is_neighbor[neigh_idx] = true;
-
-  //     for (auto k_index : k_indices) {
-  //       uint neigh_part = static_cast<uint>(floor(k_index / sample_per_region));
-  //       if (neigh_part == i)
-  //         continue;
-
-  //       if (!is_neighbor[neigh_part]) {
-  //         is_neighbor[neigh_part] = true;
-  //         neighbor_indices[i].push_back(neigh_part);
-  //       }
-  //     }
-  //   }
-  // } else {
-  //   ScopeTime t1("surf. Connectivity", debug_);
-  //   for (uint i=0; i<support_points.size(); i++) {
-
-  //     std::vector<uint> v1;
-  //     v1.reserve(support_regions[i].size());
-
-
-  //     uint max_depth_i = support_regions[i][support_regions[i].size() - 1].second;
-  //     for (uint pi=support_regions[i].size()-1; pi >   0; pi--) {
-  //       auto p = support_regions[i][pi];
-
-  //       if (p.second < max_depth_i-1)
-  //         break;
-  //       v1.push_back(p.first);
-  //     }
-
-  //     std::sort(v1.begin(), v1.end());
-
-  //     for (uint j=i+1; j<support_points.size(); j++) {
-
-  //       std::vector<uint> v2;
-  //       v2.reserve(support_regions[j].size());
-
-  //       uint max_depth_j = support_regions[j][support_regions[j].size() - 1].second;
-  //       for (uint pj=support_regions[j].size()-1; pj > 0; pj--) {
-  //         auto p = support_regions[j][pj];
-  //         v2.push_back(p.first);
-  //       }
-
-  //       std::sort(v2.begin(), v2.end());
-
-  //       std::vector<uint> v3;
-  //       std::set_intersection(v1.begin(),v1.end(),
-  //                             v2.begin(),v2.end(),
-  //                             back_inserter(v3));
-
-  //       if (v3.size() != 0) {
-  //         neighbor_indices[i].push_back(j);
-  //         neighbor_indices[j].push_back(i);
-  //       }
-  //     }
-  //   }
-  // }
-
   if (debug_)
     std::cout << "Sampled " << support_points.size() << " supports points" << std::endl;
 
@@ -1349,65 +1051,12 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
 }
 
 
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-bool GraphConstructor::angleBasedBFS(const uint sampled_idx, const float target_angle,
-                                     std::vector<std::pair<uint, int> > & region_grown,
-                                     std::vector<double> & local_clust_min_dist) {
-  // ScopeTime t("angle-based BFS", debug_);
-
-  std::deque<std::pair<uint, int> > queue;
-  auto p0 = std::make_pair(sampled_idx, 0);
-  queue.push_back(p0);
-  region_grown.push_back(p0);
-
-  float sampled_angle = 0.;
-
-  std::vector<bool> visited(pc_->points.size(), false);
-  visited[sampled_idx] = true;
-
-  while(!queue.empty() && sampled_angle < target_angle) {
-    // Dequeue a face
-    auto p = queue.front();
-    queue.pop_front();
-
-    for (uint neigh_idx=0; neigh_idx < adj_list_[p.first].size(); neigh_idx++) {
-      uint neigh = adj_list_[p.first][neigh_idx];
-
-      if (visited[neigh])
-        continue;
-
-      // if(sample_prob[neigh] == 0.){
-      //   visited[neigh] = true;
-      //   continue;
-      // }
-
-      Eigen::Vector3f n_pt = pc_->points[p.first].getNormalVector3fMap();
-      Eigen::Vector3f n_neigh = pc_->points[neigh].getNormalVector3fMap();
-
-      sampled_angle += acosf(std::max(-1.0f, std::min(1.0f, (n_pt.dot(n_neigh)))));
-      visited[neigh] = true;
-      auto p_neigh = std::make_pair(neigh, p.second + 1);
-      queue.push_back(p_neigh);
-      region_grown.push_back(p_neigh);
-    }
-  }
-
-  return sampled_angle >= target_angle;
-}
-
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // std::pair<Eigen::Matrix3f, Eigen::Vector3f>
 void  GraphConstructor::normalAlignedPca(const pcl::IndicesPtr & indices,
                                          Eigen::Matrix3f & lrf,
                                          Eigen::Vector3f & mean) {
-  // std::vector<std::pair<uint, int> > & region_grown) {
-  // ScopeTime t("PCA LRF computation", debug_);
-
-  // pcl::IndicesPtr indices(new std::vector<int>());
-  // indices->reserve(region_grown.size());
-  // for (auto p : region_grown)
-  //   indices->push_back(p.first);
 
   pcl::PCA<PointT> pca;
   pca.setInputCloud(pc_);
@@ -1463,12 +1112,12 @@ void  GraphConstructor::normalAlignedPca(const pcl::IndicesPtr & indices,
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-float GraphConstructor::regionScale(std::vector<std::pair<uint, int> > & region_grown,
+float GraphConstructor::regionScale(const pcl::IndicesPtr & indices,
                                     Eigen::Vector3f & mean) {
   float max_dist = 0.f, d;
 
-  for (auto p : region_grown) {
-    d = (pc_->points[p.first].getVector3fMap() - mean).norm();
+  for (auto pt : *indices) {
+    d = (pc_->points[pt].getVector3fMap() - mean).norm();
 
     if (d > max_dist)
       max_dist = d;

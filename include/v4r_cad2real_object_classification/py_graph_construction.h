@@ -52,12 +52,8 @@ protected:
                             std::vector<bool> & voxels_validity);
 
   // Internal graph processing
-  bool angleBasedBFS(const uint sampled_idx, const float target_angle,
-                     std::vector<std::pair<uint, int> > & region_grown,
-                     std::vector<double> & sample_prob);
-  // std::pair<Eigen::Matrix3f, Eigen::Vector3f> computeNormalAlignedPcaLrf(std::vector<std::pair<uint, int> > & region_grown);
   void  normalAlignedPca(const pcl::IndicesPtr & indices, Eigen::Matrix3f & lrf, Eigen::Vector3f & mean);
-  float regionScale(std::vector<std::pair<uint, int> > & region_grown, Eigen::Vector3f & mean);
+  float regionScale(const pcl::IndicesPtr & indices, Eigen::Vector3f & mean);
   void searchSupportPointsNeighbors(std::vector<uint> & support_points,
                                     std::vector<std::vector<uint> > & neighbor_indices,
                                     int* neigh_indices, uint neighbors_nb,
@@ -67,7 +63,7 @@ protected:
                           std::vector<Eigen::Matrix3f> & lrf_transforms,
                           std::vector<float> & scales,
                           std::vector<Eigen::Vector3f> & means,
-                          std::vector<std::vector<std::pair<uint, int> > > & support_regions,
+                          std::vector<std::vector<int> > & support_regions,
                           float neigh_size, int max_support_point, uint neighbors_nb, int seed);
 
   void normalSmoothing() {
