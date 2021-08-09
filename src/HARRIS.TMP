@@ -1,0 +1,98 @@
+
+
+  void harrisKeypoints(std::vector<float> & intensity);
+
+
+#include <pcl/keypoints/harris_3d.h>
+
+  pcl::PointCloud<pcl::PointXYZRGB>::Ptr keypoints(new pcl::PointCloud<pcl::PointXYZRGB>);
+
+  {
+    ScopeTime t("Harris Keypoints", debug_);
+    std::vector<float> harris_response(pc_->points.size(), 0.f);
+    harrisKeypoints(harris_response);
+
+    keypoints->points.resize(pc_->points.size());
+    for (uint i=0; i<pc_->points.size(); i++) {
+
+      if (harris_response[i] < 0.1)
+        continue;
+
+      pcl::PointXYZRGB p;
+      p.x = pc_->points[i].x;
+      p.y = pc_->points[i].y;
+      p.z = pc_->points[i].z;
+
+      p.r = 255*harris_response[i];
+      // p.r = 255;
+      p.g = 0;
+      p.b = 255;
+
+      keypoints->points[i] = p;
+    }
+  }
+
+
+////////////
+
+
+pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb_kp(keypoints);
+  viewer->addPointCloud<pcl::PointXYZRGB> (keypoints, rgb_kp, "keypoints");
+
+
+
+///////////////////////////////////////////
+
+void GraphConstructor::harrisKeypoints(std::vector<float> & intensity) {
+
+  float max_intensity = 0.f;
+
+  for (uint i=0; i<pc_->points.size(); i++) {
+    // Calculate normal covar
+    std::vector<float> covar(8, 0.f);
+    uint count = 0;
+    for (auto index : adj_list_[i]) {
+      if (std::isfinite(pc_->points[index].normal_x)) {
+        covar[0] += pc_->points[index].normal_x * pc_->points[index].normal_x;
+        covar[1] += pc_->points[index].normal_x * pc_->points[index].normal_y;
+        covar[2] += pc_->points[index].normal_x * pc_->points[index].normal_z;
+
+        covar[5] += pc_->points[index].normal_y * pc_->points[index].normal_y;
+        covar[6] += pc_->points[index].normal_y * pc_->points[index].normal_z;
+        covar[7] += pc_->points[index].normal_z * pc_->points[index].normal_z;
+
+        ++count;
+      }
+    }
+
+    // Normalize covar
+    if (count > 0) {
+      float norm = 1.0 / float (count);
+      covar[0] *= norm;
+      covar[1] *= norm;
+      covar[2] *= norm;
+      covar[5] *= norm;
+      covar[6] *= norm;
+      covar[7] *= norm;
+    }
+
+    float trace = covar [0] + covar [5] + covar [7];
+    if (trace != 0) {
+      float det = covar [0] * covar [5] * covar [7] + 2.0f * covar [1] * covar [2] * covar [6]
+                - covar [2] * covar [2] * covar [5]
+                - covar [1] * covar [1] * covar [7]
+                - covar [6] * covar [6] * covar [0];
+
+      intensity[i] = 0.04f + det - 0.04f * trace * trace;
+
+      if (intensity[i] > max_intensity)
+        max_intensity = intensity[i];
+    }
+
+  }
+
+  for (uint i=0; i<intensity.size(); i++)
+    intensity[i] /= max_intensity;
+
+  std::cout << "Max intensity: " << max_intensity << std::endl;
+}

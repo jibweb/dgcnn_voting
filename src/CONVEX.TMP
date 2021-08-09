@@ -1,0 +1,161 @@
+  double pointConcavity(uint pt_idx);
+  bool convexityBasedBFS(const uint sampled_idx, const float target_angle,
+                         std::vector<std::pair<uint, int> > & region_grown);
+
+
+//////////////////////////////////////
+
+
+
+
+double GraphConstructor::pointConcavity(uint pt_idx) {
+  double concavity_bel = 0.5f;
+  double convexity_bel = 0.5f;
+  Eigen::Vector3f n_pt = pc_->points[pt_idx].getNormalVector3fMap();
+
+  double local_concavity_measure, local_concavity_conf, norm;
+
+  for (auto neigh : adj_list_[pt_idx]) {
+    Eigen::Vector3f n_neigh = pc_->points[neigh].getNormalVector3fMap();
+    Eigen::Vector3f pt_to_neigh = pc_->points[neigh].getVector3fMap() - pc_->points[pt_idx].getVector3fMap();
+    pt_to_neigh.normalize();
+
+    // The closer to -1, the more convex
+    local_concavity_measure = std::max(std::min(static_cast<double>(n_pt.dot(pt_to_neigh)), 1.), -1.);
+    local_concavity_conf = (local_concavity_measure + 1.f)/2.f;
+    local_concavity_conf = std::min(std::max(0.0001, local_concavity_conf), 0.9999);
+
+    concavity_bel *= local_concavity_conf;
+    convexity_bel *= 1. - local_concavity_conf;
+    norm = concavity_bel + convexity_bel;
+    concavity_bel /= norm;
+    convexity_bel /= norm;
+  }
+
+  return concavity_bel;
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+bool GraphConstructor::convexityBasedBFS(const uint sampled_idx, const float target_angle,
+                                         std::vector<std::pair<uint, int> > & region_grown) {
+  // ScopeTime t("convexity-based BFS", debug_);
+
+  std::deque<std::pair<uint, int> > queue;
+  auto p0 = std::make_pair(sampled_idx, 0);
+  queue.push_back(p0);
+  region_grown.push_back(p0);
+
+  float sampled_angle = 0.f;
+
+  std::cout.setf(ios::fixed,ios::floatfield);
+  std::cout.precision(4);
+
+  std::vector<double> concavity1(pc_->points.size(), -1);
+  std::vector<double> concavity(pc_->points.size(), -1);
+
+  {
+    ScopeTime t("Computing convexity", debug_);
+    for (uint i=0; i<pc_->points.size(); i++) {
+      concavity1[i] = pointConcavity(i);
+      if (std::isnan(concavity1[i])) {
+        std::cout << i << " IS NaN: " << concavity[i] << std::endl;
+        std::cout << " n: " << pc_->points[i].getNormalVector3fMap() << std::endl;
+      }
+    }
+
+    // Smooth out the values
+    for (uint i=0; i<pc_->points.size(); i++) {
+      double concavity_bel = concavity1[i];
+      double convexity_bel = 1. - concavity1[i];
+
+      for (auto neigh : adj_list_[i]) {
+        concavity[neigh] = std::min(std::max(0.0001, concavity[neigh]), 0.9999);
+        concavity_bel *= concavity1[neigh];
+        convexity_bel *= 1. - concavity1[neigh];
+        double norm = concavity_bel + convexity_bel;
+        // std::cout << concavity[neigh] << " " << concavity_bel << " " << convexity_bel << " norm " << norm << std::endl;
+        concavity_bel /= norm;
+        convexity_bel /= norm;
+      }
+
+      if (std::isnan(concavity_bel)) {
+        for (auto neigh : adj_list_[i])
+          std::cout << concavity[neigh] << ", ";
+        std::cout << std::endl;
+
+        std::cout << concavity[i] << " == TO ==> " << concavity_bel << std::endl;
+      }
+
+      concavity[i] = concavity_bel;
+    }
+  }
+
+  std::vector<bool> visited(pc_->points.size(), false);
+  visited[sampled_idx] = true;
+
+  double concavity_bel = 0.5f;
+  double convexity_bel = 0.5f;
+
+  uint count = 0;
+  bool displayed = false;
+
+  while(!queue.empty() && sampled_angle < target_angle) {
+    // Dequeue a face
+    auto p = queue.front();
+    queue.pop_front();
+
+    Eigen::Vector3f n_pt = pc_->points[p.first].getNormalVector3fMap();
+
+    for (auto neigh : adj_list_[p.first]) {
+      if (visited[neigh])
+        continue;
+
+      visited[neigh] = true;
+
+      // if (concavity[neigh] == -1)
+      //   concavity[neigh] = pointConcavity(neigh);
+
+      double local_concavity_conf = concavity[neigh];
+
+      Eigen::Vector3f n_neigh = pc_->points[neigh].getNormalVector3fMap();
+
+      if ((convexity_bel > 0.99 && (local_concavity_conf > 0.51)) ||
+          (concavity_bel > 0.99 && (1.f - local_concavity_conf > 0.51)) )
+        continue;
+
+      // if ((convexity_bel > 0.99 && (local_concavity_conf > 0.5)) ||
+      //     (concavity_bel > 0.99 && (1. - local_concavity_conf > 0.5)) )
+      //   std::cout << local_concavity_conf << " / " << concavity_bel << " || " << 1. - local_concavity_conf << " / " << convexity_bel<< std::endl;
+
+      if (!displayed)
+        count++;
+
+      if (concavity_bel > 0.99 || convexity_bel > 0.99)
+        displayed= true;
+
+      // If the point is added, update the belief
+      concavity_bel *= local_concavity_conf;
+      convexity_bel *= 1. - local_concavity_conf;
+      double norm = concavity_bel + convexity_bel;
+      concavity_bel /= norm;
+      convexity_bel /= norm;
+
+      sampled_angle += acosf(std::max(-1.0f, std::min(1.0f, (n_pt.dot(n_neigh)))));
+
+      auto p_neigh = std::make_pair(neigh, p.second + 1);
+      queue.push_back(p_neigh);
+      region_grown.push_back(p_neigh);
+    }
+  }
+
+  if (concavity_bel > 0.99)
+    std::cout << "Concave ";
+  else if (convexity_bel > 0.99)
+    std::cout << "Convex ";
+  else
+    std::cout << "??? ";
+
+  std::cout << " (" << count << " steps to 99\% confidence)" << std::endl;
+
+  return sampled_angle >= target_angle;
+}
