@@ -205,3 +205,16 @@ float regionScale(const pcl::PointCloud<PointT>::Ptr & pc, const pcl::IndicesPtr
 
   return 1. / max_dist;
 }
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+inline double getAngle3D (const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const bool in_degree)
+{
+  // Compute the actual angle
+  double rad = v1.normalized ().dot (v2.normalized ());
+  if (rad < -1.0)
+    rad = -1.0;
+  else if (rad >  1.0)
+    rad = 1.0;
+  return (in_degree ? acos (rad) * 180.0 / M_PI : acos (rad));
+}

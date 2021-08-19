@@ -801,10 +801,10 @@ void GraphConstructor::supervoxelConvexAdjacency(const std::vector<std::unordere
       // Necessary calculations
       Eigen::Vector3f vec_t_to_s = supervoxels_centroids[supervoxel_idx] - supervoxels_centroids[neigh_idx];
       Eigen::Vector3f ncross = supervoxels_normals[supervoxel_idx].cross(supervoxels_normals[neigh_idx]);
-      float normal_angle = pcl::getAngle3D (supervoxels_normals[supervoxel_idx], supervoxels_normals[neigh_idx], true);
+      float normal_angle = getAngle3D (supervoxels_normals[supervoxel_idx], supervoxels_normals[neigh_idx], true);
 
       // Sanity Criterion: Check if definition convexity/concavity makes sense for connection of given patches
-      float intersection_angle =  pcl::getAngle3D (ncross, vec_t_to_s, true);
+      float intersection_angle =  getAngle3D (ncross, vec_t_to_s, true);
       float min_intersect_angle = (intersection_angle < 90.) ? intersection_angle : 180. - intersection_angle;
 
       float intersect_thresh = 60. * 1. / (1. + std::exp (-0.25 * (normal_angle - 25.)));
