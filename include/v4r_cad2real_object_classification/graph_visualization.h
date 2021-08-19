@@ -12,7 +12,6 @@ struct VizData {
   bool lrf=false;
   bool normal_occlusion=false;
   int max_support_point=32;
-  float neigh_size=200.;
   uint neighbors_nb=3;
   uint prev_support_pts_nb=0;
 };
@@ -140,6 +139,7 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
       event.keyDown ()) {
 
     viewer->removePointCloud("vertices");
+    viewer->removePointCloud("coverage");
     viewer->removePointCloud("centroids");
     viewer->removePointCloud("colors");
     viewer->removeAllShapes();
@@ -162,31 +162,58 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
     gettimeofday(&time,NULL);
     int seed = (time.tv_sec * 1000) + (time.tv_usec / 1000);
 
-    std::vector<uint> support_points;
     std::vector<std::vector<uint> > neighbor_indices;
     std::vector<Eigen::Matrix3f> lrf_transforms_vec;
     std::vector<float> scales;
     std::vector<Eigen::Vector3f> means;
     std::vector<std::vector<int> > support_regions;
-    (user_data->graph)->sampleSupportPoints(support_points, neighbor_indices, lrf_transforms_vec, scales, means, support_regions,
-                                            user_data->neigh_size, user_data->max_support_point, user_data->neighbors_nb, seed);
+    (user_data->graph)->sampleSegments(neighbor_indices, lrf_transforms_vec, scales, means, support_regions,
+                                       user_data->max_support_point, user_data->neighbors_nb, seed);
 
-    std::cout << "support_points: " << support_points.size() << " neighbor_indices: " << neighbor_indices.size() << " lrf_transforms_vec: " << lrf_transforms_vec.size() << std::endl;
-    user_data->prev_support_pts_nb = support_points.size();
+    std::cout << "support_points: " << means.size() << " neighbor_indices: " << neighbor_indices.size() << " lrf_transforms_vec: " << lrf_transforms_vec.size() << std::endl;
+    user_data->prev_support_pts_nb = means.size();
+
+
+    pcl::PointCloud<pcl::PointXYZRGB>::Ptr coverage(new pcl::PointCloud<pcl::PointXYZRGB>);
+    coverage->points.resize(pc_->points.size());
+    std::vector<bool> ignored(pc_->points.size(), true);
+
+    for (auto region : support_regions) {
+      for (auto pt_idx : region)
+        ignored[pt_idx] = false;
+    }
+
+    for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++) {
+      pcl::PointXYZRGB p;
+      p.x = pc_->points[pt_idx].x;
+      p.y = pc_->points[pt_idx].y;
+      p.z = pc_->points[pt_idx].z;
+
+      if (ignored[pt_idx]) {
+        p.r = 255;
+        p.g = 240;
+        p.b = 240;
+      } else {
+        p.r = 40;
+        p.g = 40;
+        p.b = 40;
+      }
+
+      coverage->points[pt_idx] = p;
+    }
+
 
 
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr support_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
-    pcl::PointCloud<pcl::PointXYZRGB>::Ptr support_pc_centroids(new pcl::PointCloud<pcl::PointXYZRGB>);
 
-    support_pc->points.resize(support_points.size());
-    support_pc_centroids->points.resize(support_points.size());
-    for (uint i=0; i<support_points.size(); i++) {
+    support_pc->points.resize(means.size());
+    for (uint i=0; i<means.size(); i++) {
       pcl::PointXYZRGB p;
-      p.x = pc_->points[support_points[i]].x;
-      p.y = pc_->points[support_points[i]].y;
-      p.z = pc_->points[support_points[i]].z;
+      p.x = means[i](0);
+      p.y = means[i](1);
+      p.z = means[i](2);
 
-      int H = static_cast<int>(static_cast<float>(i) / support_points.size() * 360);
+      int H = static_cast<int>(static_cast<float>(i) / means.size() * 360);
       // HSVtoRGB(H, 1.0, 1.0, p);
 
       p.r = static_cast<int> (rand() / (static_cast<double> (RAND_MAX/255)));
@@ -194,66 +221,41 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
       p.b = static_cast<int> (rand() / (static_cast<double> (RAND_MAX/255)));
 
       support_pc->points[i] = p;
-
-      p.x = means[i](0);
-      p.y = means[i](1);
-      p.z = means[i](2);
-
-      p.r = static_cast<int>(0.9 * p.r);
-      p.g = static_cast<int>(0.9 * p.g);
-      p.b = static_cast<int>(0.9 * p.b);
-
-      // HSVtoRGB(H, 0.1, 1., p);
-      support_pc_centroids->points[i] = p;
     }
 
     pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb(support_pc);
     viewer->addPointCloud<pcl::PointXYZRGB> (support_pc, rgb, "vertices");
-    // viewer->addPointCloud<pcl::PointXYZRGB> (support_pc_centroids, rgb, "centroids");
     viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 8, "vertices");
-    // viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 8, "centroids");
+
+    pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb_coverage(coverage);
+    viewer->addPointCloud<pcl::PointXYZRGB> (coverage, rgb_coverage, "coverage");
 
 
     // --- Add colored point cloud (based on grown regions) ------------------------------------------------------
-    std::vector<std::vector<std::pair<uint, float> > > ownership(pc_->points.size());
-    for (uint support_pt_idx=0; support_pt_idx < support_regions.size(); support_pt_idx++) {
-      // float max_depth = static_cast<float>(support_regions[support_pt_idx][support_regions[support_pt_idx].size() - 1].second);
-
-      for (auto p : support_regions[support_pt_idx]) {
-        auto p_own = std::make_pair(support_pt_idx, 1.);
-        ownership[p].push_back(p_own);
-      }
-    }
-
     pcl::PointCloud<pcl::PointXYZRGB>::Ptr colors_pc(new pcl::PointCloud<pcl::PointXYZRGB>);
-    colors_pc->points.resize(pc_->points.size());
+    colors_pc->points.reserve(pc_->points.size());
 
-    for (uint pt_idx=0; pt_idx < pc_->points.size(); pt_idx++) {
-      pcl::PointXYZRGB p;
-      p.x = pc_->points[pt_idx].x;
-      p.y = pc_->points[pt_idx].y;
-      p.z = pc_->points[pt_idx].z;
+    for (uint seg_idx=0; seg_idx<support_regions.size(); seg_idx++) {
+      int r = support_pc->points[seg_idx].r;
+      int g = support_pc->points[seg_idx].g;
+      int b = support_pc->points[seg_idx].b;
+      // Eigen::Vector3f offset = lrf_transforms_vec[seg_idx].row(2);
+      Eigen::Vector3f offset = means[seg_idx];
+      offset.normalize();
+      // offset*= .15f;
+      offset*= 1.1f;
 
-      float r = 0, g = 0, b = 0;
-      float total_weight = 0.;
+      for (auto pt_idx : support_regions[seg_idx]) {
+        pcl::PointXYZRGB p;
+        p.x = pc_->points[pt_idx].x; // + offset(0);
+        p.y = pc_->points[pt_idx].y; // + offset(1);
+        p.z = pc_->points[pt_idx].z; // + offset(2);
+        p.r = r;
+        p.g = g;
+        p.b = b;
 
-      for (uint c_idx=0; c_idx < ownership[pt_idx].size(); c_idx++) {
-        uint support_pt_idx = ownership[pt_idx][c_idx].first;
-        float weight = ownership[pt_idx][c_idx].second;
-        r += weight * support_pc->points[support_pt_idx].r;
-        g += weight * support_pc->points[support_pt_idx].g;
-        b += weight * support_pc->points[support_pt_idx].b;
-        total_weight += weight;
+        colors_pc->points.push_back(p);
       }
-
-      if (ownership[pt_idx].size() != 0) {
-        p.r = static_cast<int>(r / total_weight);
-        p.g = static_cast<int>(g / total_weight);
-        p.b = static_cast<int>(b / total_weight);
-      }
-
-
-      colors_pc->points[pt_idx] = p;
     }
 
     pcl::visualization::PointCloudColorHandlerRGBField<pcl::PointXYZRGB> rgb_colors(colors_pc);
@@ -262,20 +264,18 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
 
     // --- Add edges between connected points --------------------------------------------------------------------
     if (user_data->w_edges) {
-      uint pt_idx, max_neigh;
-      for (uint support_pt_idx=0; support_pt_idx<support_points.size(); support_pt_idx++) {
-        pcl::PointXYZRGB p1 = support_pc->points[support_pt_idx];
-        pt_idx = support_points[support_pt_idx];
-        max_neigh = std::min<uint>(neighbor_indices[support_pt_idx].size(), user_data->neighbors_nb);
+      for (uint seg_idx=0; seg_idx<means.size(); seg_idx++) {
+        pcl::PointXYZRGB p1 = support_pc->points[seg_idx];
+        uint max_neigh = std::min<uint>(neighbor_indices[seg_idx].size(), user_data->neighbors_nb);
 
         for (uint col_idx=0; col_idx<max_neigh; col_idx++) {
-          uint idx2 = support_points[neighbor_indices[support_pt_idx][col_idx]];
-
           pcl::PointXYZRGB p2;
-          p2.x = pc_->points[idx2].x;
-          p2.y = pc_->points[idx2].y;
-          p2.z = pc_->points[idx2].z;
-          viewer->addLine<pcl::PointXYZRGB>(p1, p2, 0., 0., 1., "line_" +std::to_string(support_pt_idx)+"_"+std::to_string(idx2));
+          p2.x = means[neighbor_indices[seg_idx][col_idx]](0);
+          p2.y = means[neighbor_indices[seg_idx][col_idx]](1);
+          p2.z = means[neighbor_indices[seg_idx][col_idx]](2);
+
+          viewer->addLine<pcl::PointXYZRGB>(p1, p2, 0., 0., 1.,
+                                            "line_" +std::to_string(seg_idx)+"_"+std::to_string(neighbor_indices[seg_idx][col_idx]));
         }
       }
     }
@@ -283,23 +283,22 @@ void keyboardEventOccurred(const pcl::visualization::KeyboardEvent &event,
 
     // --- Add LRF to support points -----------------------------------------------------------------------------
     if (user_data->w_lrf) {
-      for (uint support_pt_idx=0; support_pt_idx< lrf_transforms_vec.size(); support_pt_idx++) {
-        uint pt_idx = support_points[support_pt_idx];
-        Eigen::Vector4f v = pc_->points[pt_idx].getVector4fMap();
-        // float norm1 = 5. * lrf_transforms_vec[support_pt_idx].row(0).norm();
-        float norm1 = 5. * scales[support_pt_idx];
+      for (uint seg_idx=0; seg_idx< lrf_transforms_vec.size(); seg_idx++) {
+        Eigen::Vector4f v;
+        v << means[seg_idx](0), means[seg_idx](1), means[seg_idx](2), 1.f;
+        float norm1 = 5. * scales[seg_idx];
 
         if (std::isinf(norm1))
-          std::cout << lrf_transforms_vec[support_pt_idx] << std::endl;
+          std::cout << lrf_transforms_vec[seg_idx] << std::endl;
 
         Eigen::Matrix4f Trans;
         Trans.setIdentity();
-        Trans.block<3,3>(0,0) = lrf_transforms_vec[support_pt_idx].transpose();
+        Trans.block<3,3>(0,0) = lrf_transforms_vec[seg_idx].transpose();
         Trans.rightCols<1>() = v;
 
         Eigen::Affine3f F;
         F = Trans;
-        viewer->addCoordinateSystem(1 / norm1, F, "lrf_"+std::to_string(support_pt_idx));
+        viewer->addCoordinateSystem(1 / norm1, F, "lrf_"+std::to_string(seg_idx));
       }
     }
 

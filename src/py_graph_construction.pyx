@@ -33,10 +33,10 @@ cdef extern from "v4r_cad2real_object_classification/py_graph_construction.h":
         void initializeArray(float* vertices, unsigned int vertex_nb, int* triangles, unsigned int triangle_nb, float* normals)
         void dataAugmentation(bool normal_smoothing, float normal_occlusion, float normal_noise)
         void getBbox(float* bbox)
-        int sampleSupportPointsAndRegions(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
-                                          int* valid_indices, float* scales, int max_support_point, float neigh_size,
-                                          int neighbors_nb, float shadowing_threshold, int seed, float** regions, unsigned int region_sample_size,
-                                          int disconnect_rate, float* heights)
+        int pySampleSegments(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
+                             int* valid_indices, float* scales, int max_support_point, float neigh_size,
+                             int neighbors_nb, float shadowing_threshold, int seed, float** regions, unsigned int region_sample_size,
+                             int disconnect_rate, float* heights)
         void vizGraph(int max_support_point, float neigh_size, unsigned int neighbors_nb)
 
 
@@ -182,7 +182,7 @@ cdef class PyGraph:
             now = datetime.datetime.now()
             cseed = <int> (1000*now.second + now.microsecond/100)
 
-        result = self.c_graph.sampleSupportPointsAndRegions(
+        result = self.c_graph.pySampleSegments(
             &support_points[0, 0],
             &neigh_indices[0, 0],
             &lrf_transforms[0, 0],

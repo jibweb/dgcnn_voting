@@ -364,75 +364,8 @@ void GraphConstructor::filterPoints(std::vector<bool> & points_to_keep) {
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int GraphConstructor::sampleSupportPointsAndRegions(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
-                                                    int* valid_indices, float* scales, int max_support_point, float neigh_size,
-                                                    int neighbors_nb, float shadowing_threshold, int seed, float** regions, uint region_sample_size,
-                                                    int disconnect_rate, float* heights) {
-
-  Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor> > support_points_coords_map(support_points_coords, max_support_point, 3);
-  Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 9, Eigen::RowMajor> > lrf_transforms_map(lrf_transforms, max_support_point, 9);
-
-  std::vector<uint> support_points;
-  std::vector<std::vector<uint> > neighbor_indices;
-  std::vector<Eigen::Matrix3f> lrf_transforms_vec;
-  std::vector<float> scales_vec;
-  std::vector<Eigen::Vector3f> means_vec;
-  std::vector<std::vector<int> > support_regions;
-
-  sampleSupportPoints(support_points, neighbor_indices, lrf_transforms_vec, scales_vec, means_vec, support_regions,
-                      neigh_size, max_support_point, neighbors_nb, seed);
-
-  std::cout << "Ok 1" << std::endl;
-
-  for (uint pt_idx=0; pt_idx < support_points.size(); pt_idx++) {
-    int random_draw = rand() % 100;
-    if (random_draw < disconnect_rate)
-      continue;
-
-    // support_points_coords_map.row(pt_idx) = pc_->points[support_points[pt_idx]].getVector3fMap();
-    support_points_coords_map.row(pt_idx) = means_vec[pt_idx];
-
-    // !!! the LRF encoded in lrf_row is the transpose of the one in lrf_transforms_vec
-    // lrf_row is ColumnMajor as is Eigen by default
-    // lrf_transforms_map encode the transpose of the LRF computed (but that works out for SKPConv)
-    Eigen::Map<Eigen::Matrix3f> lrf_row(lrf_transforms_map.row(pt_idx).data(), 3, 3);
-    lrf_row = lrf_transforms_vec[pt_idx];
-
-    valid_indices[pt_idx] = 1;
-    scales[pt_idx] = scales_vec[pt_idx];
-    heights[pt_idx] = means_vec[pt_idx](2) - min_pt_.z;
-  }
-
-  std::cout << "Ok 2" << std::endl;
-
-
-  // searchSupportPointsNeighbors(support_points, neighbor_indices, neigh_indices, neighbors_nb, shadowing_threshold, valid_indices);
-
-  if (points_with_normals_) {
-    //TODO
-  } else {
-    for (uint support_pt_idx=0; support_pt_idx<support_points.size(); support_pt_idx++) {
-      Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor> > region_pts_map(regions[support_pt_idx], region_sample_size, 3);
-      // Eigen::Vector3f support_center = pc_->points[support_points[support_pt_idx]].getVector3fMap();
-
-      for (uint feat_idx=0; feat_idx < region_sample_size; feat_idx++) {
-        uint rand_idx = rand() % support_regions[support_pt_idx].size();
-        uint pt_idx = support_regions[support_pt_idx][rand_idx];
-        Eigen::Vector3f centered_coords = pc_->points[pt_idx].getVector3fMap() - means_vec[support_pt_idx];
-        // Eigen::Vector3f centered_coords = pc_->points[pt_idx].getVector3fMap() - support_center;
-
-        region_pts_map.row(feat_idx) = scales[support_pt_idx] * lrf_transforms_vec[support_pt_idx] * centered_coords;
-      }
-    }
-    std::cout << "Ok 3" << std::endl;
-
-  }
-}
-
-
-
-void GraphConstructor::voxelSeeding(std::unordered_map<int, std::tuple<uint, uint, float> > & voxels_map,
-                                         std::vector<uint> & pt_voxel_indices) {
+void GraphConstructor::voxelSeeding(std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > & voxels_map,
+                                    std::vector<uint> & pt_voxel_indices) {
   ScopeTime t("Voxel Seeding", debug_);
 
   float half_voxel_size = voxel_size_ / 2.f;
@@ -461,15 +394,17 @@ void GraphConstructor::voxelSeeding(std::unordered_map<int, std::tuple<uint, uin
 
       // Check the normal to separate the two sides of a thin object
       Eigen::Vector3f n_pt = pc_->points[pt_idx].getNormalVector3fMap();
-      Eigen::Vector3f n_vox = pc_->points[std::get<1>(search->second)].getNormalVector3fMap();
-      float vox_pt_angle = acosf(std::max(-1.0f, std::min(1.0f, (n_pt.dot(n_vox)))));
+      // Eigen::Vector3f n_vox = pc_->points[std::get<1>(search->second)].getNormalVector3fMap();
+      float vox_pt_angle = acosf(std::max(-1.0f, std::min(1.0f, (n_pt.dot(std::get<3>(search->second))))));
 
 
-      if (vox_pt_angle > M_PI / 2.f) {
+      if (vox_pt_angle > 1.f*M_PI/2.f) { // 100° difference to decide whether it is the opposite side of the object
         search = voxels_map.find(-key);
         if (search != voxels_map.end()) {
           // There is already an entry for the opposite voxel
           pt_voxel_indices[pt_idx] = std::get<0>(search->second);
+          // std::get<3>(search->second) += pc_->points[pt_idx].getNormalVector3fMap();
+          // std::get<3>(search->second).normalize();
 
           if (dist_to_voxel_center < std::get<2>(search->second)) {
             std::get<2>(search->second) = dist_to_voxel_center;
@@ -478,13 +413,15 @@ void GraphConstructor::voxelSeeding(std::unordered_map<int, std::tuple<uint, uin
         } else {
           // There is no entry for the opposite voxel
           pt_voxel_indices[pt_idx] = voxel_num;
-          voxels_map[-key] = std::make_tuple(voxel_num, pt_idx, dist_to_voxel_center);
+          voxels_map[-key] = std::make_tuple(voxel_num, pt_idx, dist_to_voxel_center, pc_->points[pt_idx].getNormalVector3fMap());
           voxel_num++;
         }
 
       } else {
         // The current point fits the direction of the voxel
         pt_voxel_indices[pt_idx] = std::get<0>(search->second);
+        // std::get<3>(search->second) += pc_->points[pt_idx].getNormalVector3fMap();
+        // std::get<3>(search->second).normalize();
 
         if (dist_to_voxel_center < std::get<2>(search->second)) {
           std::get<2>(search->second) = dist_to_voxel_center;
@@ -495,7 +432,7 @@ void GraphConstructor::voxelSeeding(std::unordered_map<int, std::tuple<uint, uin
     } else {
       // There no entry yet for that voxel
       pt_voxel_indices[pt_idx] = voxel_num;
-      voxels_map[key] = std::make_tuple(voxel_num, pt_idx, dist_to_voxel_center);
+      voxels_map[key] = std::make_tuple(voxel_num, pt_idx, dist_to_voxel_center, pc_->points[pt_idx].getNormalVector3fMap());
       voxel_num++;
     }
 
@@ -503,7 +440,8 @@ void GraphConstructor::voxelSeeding(std::unordered_map<int, std::tuple<uint, uin
 }
 
 
-void GraphConstructor::voxelAdjacency(std::unordered_map<int, std::tuple<uint, uint, float> > & voxels_map,
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void GraphConstructor::voxelAdjacency(std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > & voxels_map,
                                       std::vector<std::vector<uint> > & voxels_adjacency,
                                       std::vector<Eigen::Vector3f> & voxels_normals) {
   ScopeTime t("Voxel Adjacency", debug_);
@@ -556,7 +494,7 @@ void GraphConstructor::voxelAdjacency(std::unordered_map<int, std::tuple<uint, u
           if (search != voxels_map.end()) {
             uint neigh_voxel_idx = std::get<0>(search->second);
 
-            if ((acosf(std::max(-1.0f, std::min(1.0f, (voxels_normals[voxel_idx].dot(voxels_normals[neigh_voxel_idx]))))) < M_PI/2.f)) {
+            if ((acosf(std::max(-1.0f, std::min(1.0f, (voxels_normals[voxel_idx].dot(voxels_normals[neigh_voxel_idx]))))) < 1.f*M_PI/2.f)) {
               voxels_adjacency[voxel_idx].push_back(neigh_voxel_idx);
             } else {
               search = voxels_map.find(-key);
@@ -574,8 +512,8 @@ void GraphConstructor::voxelAdjacency(std::unordered_map<int, std::tuple<uint, u
 }
 
 
-
-void GraphConstructor::supervoxelRefinement(std::unordered_map<int, std::tuple<uint, uint, float> > & voxels_map,
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void GraphConstructor::supervoxelRefinement(std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > & voxels_map,
                                             std::vector<uint> & pt_voxel_indices,
                                             std::vector<uint> & pt_supervoxel_indices,
                                             std::vector<std::vector<uint> > & voxels_adjacency,
@@ -584,14 +522,21 @@ void GraphConstructor::supervoxelRefinement(std::unordered_map<int, std::tuple<u
                                             std::vector<bool> & voxels_validity) {
   ScopeTime t("Supervoxel Refinement", debug_);
 
-  std::vector<uint> pt_voxel_dist(pc_->points.size(), 1e4);
-  std::vector<uint> voxel_to_supervoxel(voxels_map.size());
+  std::vector<float> pt_voxel_dist(pc_->points.size());
+  for (uint pt_idx=0; pt_idx<pt_voxel_dist.size(); pt_idx++) {
+    Eigen::Vector3f n_pt = pc_->points[pt_idx].getNormalVector3fMap();
+    uint voxel_idx = pt_voxel_indices[pt_idx];
+
+    pt_supervoxel_indices[pt_idx] = pt_voxel_indices[pt_idx];
+    pt_voxel_dist[pt_idx] = acosf(std::max(-1.0f, std::min(1.0f, voxels_normals[voxel_idx].dot(n_pt)))) + 1e-3;
+  }
+
   uint x_idx, y_idx, z_idx;
 
   for (auto& v : voxels_map) {
-    // Recover the original grid index
     uint voxel_idx = std::get<0>(v.second);
 
+    // Recover the original grid index
     int key = abs(v.first);
     int vx_idx = static_cast<int>(key % x_voxel_num_);
     int vyz = static_cast<int>(key / x_voxel_num_);
@@ -600,16 +545,12 @@ void GraphConstructor::supervoxelRefinement(std::unordered_map<int, std::tuple<u
 
     Eigen::Vector3f n_vox = voxels_normals[voxel_idx];
 
-    std::deque<uint> queue;
     uint sampled_idx = std::get<1>(v.second);
-    Eigen::Vector3f n_sampled = pc_->points[sampled_idx].getNormalVector3fMap();
-    float sampled_dist = acosf(std::max(-1.0f, std::min(1.0f, (n_vox.dot(n_sampled)))));
-    if (sampled_dist < pt_voxel_dist[sampled_idx]) {
-      pt_voxel_dist[sampled_idx] = sampled_dist;
-      pt_supervoxel_indices[sampled_idx] = voxel_idx;
-      queue.push_back(sampled_idx);
-      voxels_validity[voxel_idx] = true;
-    }
+    if (pt_supervoxel_indices[sampled_idx] != voxel_idx)
+      continue;
+
+    std::deque<uint> queue;
+    queue.push_back(sampled_idx);
 
     std::vector<bool> visited(pc_->points.size(), false);
     visited[sampled_idx] = true;
@@ -648,62 +589,294 @@ void GraphConstructor::supervoxelRefinement(std::unordered_map<int, std::tuple<u
         }
       }
     } // -- end while(!queue.empty())
-
   } // -- end for v in voxels_map
 
+  // Count the elements in each supervoxels after refinement
+  std::vector<uint> supervoxels_pt_num(voxels_map.size(), 0);
+  for (auto voxel_idx : pt_supervoxel_indices) {
+    voxels_validity[voxel_idx] = true;
+    supervoxels_pt_num[voxel_idx]++;
+  }
 
+  std::vector<uint> voxel_to_supervoxel(voxels_map.size());
   for (auto v : voxels_map) {
-    voxel_to_supervoxel[std::get<0>(v.second)] = pt_supervoxel_indices[std::get<1>(v.second)];
+    uint voxel_idx = std::get<0>(v.second);
+    if (voxels_validity[voxel_idx])
+      voxel_to_supervoxel[voxel_idx] = voxel_idx;
+    else
+      voxel_to_supervoxel[voxel_idx] = pt_supervoxel_indices[std::get<1>(v.second)];
   }
 
+  // Invalidate any voxel that is smaller than k points and merge it with the most fitting neighbor
+  // uint min_supervoxel_size = 10;
+  // for (uint i=0; i<5; i++) {
+  //   for (uint voxel_idx=0; voxel_idx<voxels_map.size(); voxel_idx++) {
+  //     if (!voxels_validity[voxel_idx] || (supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] >= min_supervoxel_size))
+  //       continue;
 
-  for (uint i=0; i<pt_supervoxel_indices.size(); i++) {
-    if (pt_supervoxel_indices[i] == 1e5)
-      pt_supervoxel_indices[i] = voxel_to_supervoxel[pt_voxel_indices[i]];
+  //     if (voxels_adjacency[voxel_idx].size() == 0) {
+  //       voxels_validity[voxel_idx] = false;
+  //       continue;
+  //     }
+
+  //     uint voxel_pt_num = supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]];
+
+  //     // if (voxel_pt_num == 0) {
+  //     //   voxels_validity[voxel_idx] = false;
+  //     //   continue;
+  //     // }
+  //     supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] -= voxel_pt_num;
+
+  //     float min_dist = 1e6;
+  //     std::cout << voxel_idx << " -- Valid neighbors: ";
+  //     for (auto neigh_idx : voxels_adjacency[voxel_idx]) {
+  //       if (!voxels_validity[neigh_idx])
+  //         continue;
+
+  //       float sampled_dist = acosf(std::max(-1.0f, std::min(1.0f, voxels_normals[voxel_idx].dot(voxels_normals[neigh_idx]))));
+
+  //       if (supervoxels_pt_num[neigh_idx] >= min_supervoxel_size) {
+  //         std::cout << neigh_idx << ", ";
+  //         if ((supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] < min_supervoxel_size) || (sampled_dist < min_dist)) {
+  //             min_dist = sampled_dist;
+  //             voxel_to_supervoxel[voxel_idx] = neigh_idx;
+  //         }
+  //       } else {
+  //         if ((supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] < min_supervoxel_size) && (sampled_dist < min_dist)) {
+  //           min_dist = sampled_dist;
+  //           voxel_to_supervoxel[voxel_idx] = neigh_idx;
+  //         }
+  //       }
+  //     } // -- end for (auto neigh_idx : voxels_adjacency[voxel_idx])
+
+  //     std::cout << " / " << voxels_adjacency[voxel_idx].size() << " neighbors :: Final assignment: " << voxel_to_supervoxel[voxel_idx] << std::endl;
+  //     supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] += voxel_pt_num;
+  //   } // -- end for (uint voxel_idx=0; voxel_idx<voxels_map.size(); voxel_idx++)
+  // }
+
+  // std::vector<uint> voxel_to_supervoxel(voxels_map.size());
+  // for (auto v : voxels_map) {
+  //   uint voxel_idx = std::get<0>(v.second);
+  //   if (voxels_validity[voxel_idx])
+  //     voxel_to_supervoxel[voxel_idx] = voxel_idx;
+  //   else
+  //     voxel_to_supervoxel[voxel_idx] = pt_supervoxel_indices[std::get<1>(v.second)];
+  // }
+
+  // // Invalidate any voxel that is smaller than k points and merge it with the most fitting neighbor
+  // uint min_supervoxel_size = 10;
+  // for (uint voxel_idx=0; voxel_idx<voxels_map.size(); voxel_idx++) {
+  //   if (!voxels_validity[voxel_idx] || (supervoxels_pt_num[voxel_idx] >= min_supervoxel_size))
+  //     continue;
+
+  //   float min_dist = 1e6;
+  //   for (auto neigh_idx : voxels_adjacency[voxel_idx]) {
+  //     if (!voxels_validity[neigh_idx])
+  //       continue;
+
+  //     float sampled_dist = acosf(std::max(-1.0f, std::min(1.0f, voxels_normals[voxel_idx].dot(voxels_normals[neigh_idx]))));
+
+  //     if (supervoxels_pt_num[neigh_idx] >= min_supervoxel_size) {
+  //       if ((supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] < min_supervoxel_size) || (sampled_dist < min_dist)) {
+  //           min_dist = sampled_dist;
+  //           voxel_to_supervoxel[voxel_idx] = neigh_idx;
+  //       }
+  //     } else {
+  //       if ((supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] < min_supervoxel_size) && (sampled_dist < min_dist)) {
+  //         min_dist = sampled_dist;
+  //         voxel_to_supervoxel[voxel_idx] = neigh_idx;
+  //       }
+  //     }
+  //   }
+  // }
+
+  // // The correct supervoxel to be reassigned to will have a stable index between voxel and supervoxel aka be a valid supervoxel
+  // for (uint voxel_idx=0; voxel_idx<voxels_map.size(); voxel_idx++) {
+  //   // Cycles may happen when reassigning the label. To make sure the program doesn't get stuck, only follow the
+  //   // links for a fixed number of steps
+  //   for (uint i=0; i<10; i++) {
+  //   // while (voxel_to_supervoxel[voxel_idx] != voxel_to_supervoxel[voxel_to_supervoxel[voxel_idx]]) {
+  //     // std::cout << voxel_idx << ", " << voxel_to_supervoxel[voxel_idx] << " -> " << voxel_to_supervoxel[voxel_to_supervoxel[voxel_idx]] << std::endl;
+  //     voxel_to_supervoxel[voxel_idx] = voxel_to_supervoxel[voxel_to_supervoxel[voxel_idx]];
+  //     if (voxel_to_supervoxel[voxel_idx] == voxel_to_supervoxel[voxel_to_supervoxel[voxel_idx]])
+  //       break;
+  //   }
+
+  //   uint voxel_pt_num = supervoxels_pt_num[voxel_idx];
+
+  //   supervoxels_pt_num[voxel_to_supervoxel[voxel_idx]] += voxel_pt_num;
+  //   supervoxels_pt_num[voxel_idx] -= voxel_pt_num;
+  // }
+
+  // for (uint voxel_idx=0; voxel_idx<voxels_map.size(); voxel_idx++) {
+  //   if (supervoxels_pt_num[voxel_idx] < min_supervoxel_size) {
+  //     voxels_validity[voxel_idx] = false;
+  //   }
+  // }
+
+  // Update the supervoxel points indices
+  for (uint i=0; i<pt_supervoxel_indices.size(); i++)
+    pt_supervoxel_indices[i] = voxel_to_supervoxel[pt_supervoxel_indices[i]];
+
+  // Update the supervoxel adjacency
+  for (uint voxel_idx=0; voxel_idx<voxels_map.size(); voxel_idx++) {
+    if (!voxels_validity[voxel_to_supervoxel[voxel_idx]])
+      continue;
+    for (auto neigh_idx : voxels_adjacency[voxel_idx]) {
+      if (!voxels_validity[voxel_to_supervoxel[neigh_idx]])
+        continue;
+
+      if (voxel_to_supervoxel[voxel_idx] != voxel_to_supervoxel[neigh_idx])
+        supervoxels_adjacency[voxel_to_supervoxel[voxel_idx]].insert(voxel_to_supervoxel[neigh_idx]);
+    }
   }
+}
 
 
-  for (uint voxel_idx=0; voxel_idx<voxels_map.size(); voxel_idx++)
-    for (auto neigh_idx : voxels_adjacency[voxel_idx])
-      supervoxels_adjacency[voxel_to_supervoxel[voxel_idx]].insert(voxel_to_supervoxel[neigh_idx]);
+void GraphConstructor::supervoxelAverageConvexity(const std::vector<pcl::IndicesPtr>  & supervoxels_indices,
+                                                  const std::vector<bool> & voxels_validity,
+                                                  const uint & sampled_pair_num,
+                                                  std::vector<double> & average_convexity) {
+  ScopeTime t("Average Convexity", debug_);
+  double local_convexity_conf, norm;
+
+  std::vector<double> concavity_bels(voxels_validity.size(), 0.5);
+
+  for (uint voxel_idx=0; voxel_idx<voxels_validity.size(); voxel_idx++) {
+    if (!voxels_validity[voxel_idx])
+      continue;
+
+    average_convexity[voxel_idx] = 0.;
+
+    for (uint pair_idx=0; pair_idx < sampled_pair_num; pair_idx++) {
+        // get a new random point
+        int index1 = rand()%supervoxels_indices[voxel_idx]->size();
+        int index2 = rand()%supervoxels_indices[voxel_idx]->size();
+
+        if (index1==index2)
+        {
+          pair_idx--;
+          continue;
+        }
+
+        uint pt1_idx = (*(supervoxels_indices[voxel_idx]))[index1];
+        uint pt2_idx = (*(supervoxels_indices[voxel_idx]))[index2];
+
+        local_convexity_conf = convexityConfidence(pc_->points[pt1_idx].getVector3fMap(),
+                                                   pc_->points[pt2_idx].getVector3fMap(),
+                                                   pc_->points[pt1_idx].getNormalVector3fMap(),
+                                                   pc_->points[pt2_idx].getNormalVector3fMap());
+
+        // Fuse that local measurement into a voxel-level prediction
+        average_convexity[voxel_idx] += local_convexity_conf / static_cast<double>(sampled_pair_num);
+        // Fuse that local measurement into a voxel-level prediction
+        // average_convexity[voxel_idx] *= local_convexity_conf;
+        // concavity_bels[voxel_idx] *= 1. - local_convexity_conf;
+        // norm = concavity_bels[voxel_idx] + average_convexity[voxel_idx];
+        // concavity_bels[voxel_idx] /= norm;
+        // average_convexity[voxel_idx] /= norm;
+
+    }
+  }
+}
+
+
+void GraphConstructor::supervoxelConvexAdjacency(const std::vector<std::unordered_set<uint> > & supervoxels_adjacency,
+                                                 const std::vector<pcl::IndicesPtr>  & supervoxels_indices,
+                                                 const std::vector<bool> & voxels_validity,
+                                                 std::vector<Eigen::Vector3f> & supervoxels_centroids,
+                                                 std::vector<Eigen::Vector3f> & supervoxels_normals,
+                                                 std::vector<std::vector<uint> > & valid_supervoxels_adjacency) {
+  for (uint supervoxel_idx=0; supervoxel_idx<supervoxels_adjacency.size(); supervoxel_idx++) {
+    if (!voxels_validity[supervoxel_idx])
+      continue;
+
+    valid_supervoxels_adjacency.reserve(supervoxels_adjacency[supervoxel_idx].size());
+    for (auto neigh_idx : supervoxels_adjacency[supervoxel_idx]) {
+      if (!voxels_validity[neigh_idx]) {
+        std::cout << "found invalid neighbor ! Neighbor size: " << supervoxels_indices[neigh_idx]->size() << " and idx: " << neigh_idx << std::endl;
+        continue;
+      }
+
+      // Necessary calculations
+      Eigen::Vector3f vec_t_to_s = supervoxels_centroids[supervoxel_idx] - supervoxels_centroids[neigh_idx];
+      Eigen::Vector3f ncross = supervoxels_normals[supervoxel_idx].cross(supervoxels_normals[neigh_idx]);
+      float normal_angle = pcl::getAngle3D (supervoxels_normals[supervoxel_idx], supervoxels_normals[neigh_idx], true);
+
+      // Sanity Criterion: Check if definition convexity/concavity makes sense for connection of given patches
+      float intersection_angle =  pcl::getAngle3D (ncross, vec_t_to_s, true);
+      float min_intersect_angle = (intersection_angle < 90.) ? intersection_angle : 180. - intersection_angle;
+
+      float intersect_thresh = 60. * 1. / (1. + std::exp (-0.25 * (normal_angle - 25.)));
+      if (min_intersect_angle < intersect_thresh) {
+        // std::cout << min_intersect_angle << " < " << intersect_thresh << "  // " << normal_angle << std::endl;
+        continue;
+      }
+
+
+      // Convexity criterion
+      double convexity_conf = convexityConfidence(supervoxels_centroids[supervoxel_idx],
+                                                  supervoxels_centroids[neigh_idx],
+                                                  supervoxels_normals[supervoxel_idx],
+                                                  supervoxels_normals[neigh_idx]);
+      // Convex connection are valid
+      if (convexity_conf >= 0.5) {
+        valid_supervoxels_adjacency[supervoxel_idx].push_back(neigh_idx);
+      } else {
+        // If the angle is small enough, we still consider the connection
+        if (normal_angle < 10.f)
+          valid_supervoxels_adjacency[supervoxel_idx].push_back(neigh_idx);
+
+        // // If both parts are concave, then the connection is also valid
+        // if (convexity_bels[supervoxel_idx] <= 0.4 && convexity_bels[neigh_idx] <= 0.4)
+        //   valid_supervoxels_adjacency[supervoxel_idx].push_back(neigh_idx);
+      }
+    }
+  }
 }
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
-                                          std::vector<std::vector<uint> > & neighbor_indices,
-                                          std::vector<Eigen::Matrix3f> & lrf_transforms,
-                                          std::vector<float> & scales,
-                                          std::vector<Eigen::Vector3f> & means,
-                                          std::vector<std::vector<int> > & support_regions,
-                                          float neigh_size, int max_support_point, uint neighbors_nb, int seed) {
+int GraphConstructor::sampleSegments(std::vector<std::vector<uint> > & neighbor_indices,
+                                     std::vector<Eigen::Matrix3f> & lrf_transforms,
+                                     std::vector<float> & scales,
+                                     std::vector<Eigen::Vector3f> & means,
+                                     std::vector<std::vector<int> > & support_regions,
+                                     int max_support_point, uint neighbors_nb, int seed) {
+
+  ScopeTime t("Segments sampling", debug_);
 
   //Pre-allocate memory
-  support_points.reserve(max_support_point);
   lrf_transforms.reserve(max_support_point);
   scales.reserve(max_support_point);
   means.reserve(max_support_point);
   support_regions.reserve(max_support_point);
 
+  if (debug_)
+    std::cout << "Seed: " << seed << std::endl;
+
+  srand(seed);
+
   // --- Initial seeds sampling and voxel assignment -------------------------------------------------------------
-  std::unordered_map<int, std::tuple<uint, uint, float> > voxels_map;
+  std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > voxels_map;
   std::vector<uint> pt_voxel_indices(pc_->points.size());
   voxelSeeding(voxels_map, pt_voxel_indices);
   uint voxel_num = voxels_map.size();
 
 
   // --- Voxel normal computation --------------------------------------------------------------------------------
+  std::vector<Eigen::Vector3f> voxels_centroids(voxel_num);
   std::vector<Eigen::Vector3f> voxels_normals(voxel_num);
 
   for (auto& v : voxels_map) {
-    Eigen::Vector3f normal = pc_->points[std::get<1>(v.second)].getNormalVector3fMap();
+    voxels_centroids[std::get<0>(v.second)] = pc_->points[std::get<1>(v.second)].getVector3fMap();
+    // Eigen::Vector3f normal = pc_->points[std::get<1>(v.second)].getNormalVector3fMap();
+    // for (auto neigh_idx : adj_list_[std::get<1>(v.second)])
+    //   normal += pc_->points[neigh_idx].getNormalVector3fMap();
 
-    for (auto neigh_idx : adj_list_[std::get<1>(v.second)]) {
-      normal += pc_->points[neigh_idx].getNormalVector3fMap();
-    }
-
-    normal.normalize();
-    voxels_normals[std::get<0>(v.second)] = normal;
+    // normal.normalize();
+    // voxels_normals[std::get<0>(v.second)] = normal;
+    voxels_normals[std::get<0>(v.second)] = std::get<3>(v.second);
   }
 
 
@@ -721,17 +894,10 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
                        voxels_normals, voxels_validity);
 
 
-  uint valid_voxel_num = 0;
-  // std::vector<int> voxel_to_supervoxel_indices(voxel_num, -1);
-  for (uint voxel_idx=0; voxel_idx<voxel_num; voxel_idx++) {
-    if (voxels_validity[voxel_idx]) {
-      // voxel_to_supervoxel_indices[voxel_idx] = valid_voxel_num;
-      valid_voxel_num++;
-    }
-  }
-
+  // --- Supervoxel extraction -----------------------------------------------------------------------------------
   std::vector<pcl::IndicesPtr> supervoxels_indices;
   supervoxels_indices.reserve(voxel_num);
+
   for( int i = 0; i < voxel_num; ++i ) {
     supervoxels_indices.emplace_back(new std::vector<int>());
     supervoxels_indices[i]->reserve(50);
@@ -739,88 +905,147 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
 
   for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++) {
     uint supervoxel_idx = pt_supervoxel_indices[pt_idx];
+    if (!voxels_validity[supervoxel_idx]) {
+      std::cout << "found points from invalid voxel " << supervoxel_idx << std::endl;
+      continue;
+    }
     supervoxels_indices[supervoxel_idx]->push_back(pt_idx);
   }
 
-  std::vector<PointT> voxels_centers(voxel_num);
-  for (auto v : voxels_map) {
-    voxels_centers[std::get<0>(v.second)] = pc_->points[std::get<1>(v.second)];
-  }
 
-
-  std::cout << "Points: " << pc_->points.size() << " / Voxels: " << voxel_num << " / Valid voxels: " << valid_voxel_num << std::endl;
-
-
-  std::vector<double> concavity_bels(voxel_num, 0.5);
-  std::vector<double> convexity_bels(voxel_num, 0.5);
-
+  // --- Supervoxel properties -----------------------------------------------------------------------------------
   std::vector<Eigen::Vector3f> supervoxels_centers(voxel_num);
+  std::vector<Eigen::Vector3f> supervoxels_centroids(voxel_num);
   std::vector<Eigen::Vector3f> supervoxels_normals(voxel_num);
 
-{
-
+  uint valid_voxels_num = 0;
   for (uint voxel_idx=0; voxel_idx<voxel_num; voxel_idx++) {
-
-    if (supervoxels_indices[voxel_idx]->size() <= 3)
+    if (!voxels_validity[voxel_idx])
       continue;
 
-    Eigen::Vector3f mean;
-    Eigen::Matrix3f lrf;
-    normalAlignedPca(supervoxels_indices[voxel_idx], lrf, mean);
+    valid_voxels_num++;
+
+    // if (supervoxels_indices[voxel_idx]->size() < 3) {
+    //   std::cout << "Found a cluster too small !! size: " << supervoxels_indices[voxel_idx]->size() << " and idx: " << voxel_idx << std::endl;
+    //   voxels_validity[voxel_idx] = false;
+    //   continue;
+    // }
+
+
+    Eigen::Vector3f mean = Eigen::Vector3f::Zero();
+    Eigen::Vector3f normal = Eigen::Vector3f::Zero();
+    // Eigen::Matrix3f lrf;
+    // normalAlignedPca(pc_, supervoxels_indices[voxel_idx], lrf, mean);
+    // supervoxels_centers[voxel_idx] = mean;
+    // supervoxels_normals[voxel_idx] = lrf.row(2);
+
+    for (auto pt_idx : *(supervoxels_indices[voxel_idx])) {
+      mean += pc_->points[pt_idx].getVector3fMap() / static_cast<float>(supervoxels_indices[voxel_idx]->size());
+      // normal += pc_->points[pt_idx].getNormalVector3fMap() / static_cast<float>(supervoxels_indices[voxel_idx]->size());
+    }
+    // normal.normalize();
+
+    Eigen::Vector3f centroid = Eigen::Vector3f::Zero();
+    float min_dist = 1e6;
+    for (auto pt_idx : *(supervoxels_indices[voxel_idx])) {
+      Eigen::Vector3f pt_coords = pc_->points[pt_idx].getVector3fMap();
+      float dist = (pt_coords - mean).norm();
+      if (dist < min_dist) {
+        min_dist = dist;
+        centroid = pt_coords;
+        normal = pc_->points[pt_idx].getNormalVector3fMap();
+      }
+    }
+
     supervoxels_centers[voxel_idx] = mean;
-    supervoxels_normals[voxel_idx] = lrf.row(2);
+    supervoxels_centroids[voxel_idx] = centroid;
+    supervoxels_normals[voxel_idx] = normal;
+
   }
 
+  std::cout << "Valid voxels: " << valid_voxels_num << std::endl;
 
 
-  ScopeTime t("Convexity", debug_);
-  double local_convexity_conf, norm;
-
-  for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++) {
-    // Measure the convexity between the point and its corresponding voxel
-    uint voxel_idx = pt_supervoxel_indices[pt_idx];
-    local_convexity_conf = convexityConfidence(supervoxels_centers[voxel_idx],
-                                               pc_->points[pt_idx].getVector3fMap(),
-                                               supervoxels_normals[voxel_idx],
-                                               pc_->points[pt_idx].getNormalVector3fMap());
-
-    // Fuse that local measurement into a voxel-level prediction
-    convexity_bels[voxel_idx] *= local_convexity_conf;
-    concavity_bels[voxel_idx] *= 1. - local_convexity_conf;
-    norm = concavity_bels[voxel_idx] + convexity_bels[voxel_idx];
-    concavity_bels[voxel_idx] /= norm;
-    convexity_bels[voxel_idx] /= norm;
-  }
-} // -- end ScopeTime t("Convexity", debug_);
+  // --- Supervoxel convexity ------------------------------------------------------------------------------------
+  // std::vector<double> convexity_bels(voxel_num, 0.);
+  // uint sampled_pair_num = 200;
+  // supervoxelAverageConvexity(supervoxels_indices, voxels_validity, sampled_pair_num, convexity_bels);
+  std::vector<std::vector<uint> > valid_supervoxels_adjacency(voxel_num);
+  supervoxelConvexAdjacency(supervoxels_adjacency,
+                            supervoxels_indices,
+                            voxels_validity,
+                            supervoxels_centroids,
+                            voxels_normals,
+                            valid_supervoxels_adjacency);
 
 
-  // std::vector<uint> pt_merged_voxel_indices(pc_->points.size(), 1e5);
+  // --- Segment merging -----------------------------------------------------------------------------------------
   std::vector<std::vector<uint> > segments_to_supervoxels;
   std::vector<std::vector<uint> > supervoxels_to_segments;
   supervoxels_to_segments.resize(voxel_num);
-
 {
   ScopeTime t("Segment Merging", debug_);
-  // std::vector<uint> voxel_to_merged_voxel(voxel_num);
   segments_to_supervoxels.reserve(100);
   std::vector<bool> is_processed(voxel_num, false);
   double convexity_conf;
 
-  // Maybe randomize the order of voxels
-  // convexity average convexity instead ? Merge neighboring segment with similar average convexity ?
-  // remove the acos
-  // look at overlap
-  // improve merging, for neater clusters. Double check same_proj as it looks weird right now
+  uint remaining_voxels = valid_voxels_num;
+  // for (uint sample_idx=0; sample_idx<valid_voxels_num; sample_idx++) {
+  for (uint sample_idx=0; sample_idx<max_support_point; sample_idx++) {
+    uint voxel_idx = voxel_num;
+    if (remaining_voxels == 0)
+      break;
 
-  for (uint voxel_idx=0; voxel_idx<voxel_num; voxel_idx++) {
+    int random_draw = rand() % remaining_voxels;
+    for (uint i=0; i<voxel_num; i++) {
+      if (!voxels_validity[i] || is_processed[i])
+        continue;
+
+      if (random_draw == 0) {
+        voxel_idx = i;
+        break;
+      }
+
+      random_draw--;
+    }
+
+    if (voxel_idx == voxel_num)
+      break;
+
+
     if (!voxels_validity[voxel_idx] || is_processed[voxel_idx]) {
-      is_processed[voxel_idx] = true;
+      std::cout << "/!\\ THIS CONDITION SHOULD NOT HAPPEN" << std::endl;
+      continue;
+    }
+
+    remaining_voxels--;
+    is_processed[voxel_idx] = true;
+
+    // If the voxel is surrounded by already processed neighbors, we just add it to a segment
+    bool all_processed_neighbors = true;
+    for (auto neigh_idx : valid_supervoxels_adjacency[voxel_idx])
+      all_processed_neighbors &= is_processed[neigh_idx];
+
+    if (all_processed_neighbors && (valid_supervoxels_adjacency[voxel_idx].size() != 0)) {
+      // TODO: assign to most fitting rather than first one !
+      for (auto neigh_idx : valid_supervoxels_adjacency[voxel_idx]) {
+        if (supervoxels_to_segments[neigh_idx].size() != 0) {
+          uint neigh_seg_idx = supervoxels_to_segments[neigh_idx][0];
+          supervoxels_to_segments[voxel_idx].push_back(neigh_seg_idx);
+          segments_to_supervoxels[neigh_seg_idx].push_back(voxel_idx);
+          break;
+        }
+      }
+
+      sample_idx--;
       continue;
     }
 
     std::vector<bool> visited(voxel_num, false);
+    visited[voxel_idx] = true;
     std::vector<uint> segment;
     segment.reserve(50);
+    segment.push_back(voxel_idx);
     std::deque<uint> queue;
     queue.push_back(voxel_idx);
 
@@ -829,51 +1054,77 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
       uint supervoxel_idx = queue.front();
       queue.pop_front();
 
-      segment.push_back(supervoxel_idx);
-
-      for (auto neigh_idx : supervoxels_adjacency[supervoxel_idx]) {
-        if (!voxels_validity[neigh_idx] || visited[neigh_idx])
+      for (auto neigh_idx : valid_supervoxels_adjacency[supervoxel_idx]) {
+        if (visited[neigh_idx])
           continue;
 
-        is_processed[neigh_idx] = true;
+        if (is_processed[neigh_idx])
+          continue;
+
         visited[neigh_idx] = true;
 
+        // Check whether the current neighbor would be part of the same projection
         bool same_proj = true;
         for (uint seg_elt : segment)
-          // same_proj = same_proj && (supervoxels_normals[supervoxel_idx].dot(supervoxels_normals[seg_elt]) > 0.f);
-          same_proj = same_proj && (supervoxels_normals[supervoxel_idx].dot(supervoxels_normals[seg_elt]) > cosf(M_PI*5.f/9.f));
+          same_proj = same_proj && (voxels_normals[neigh_idx].dot(voxels_normals[seg_elt]) > cosf(M_PI*12.f/18.f));
 
-        if (!same_proj)
+        if (!same_proj) // && pcl::getAngle3D(supervoxels_normals[supervoxel_idx], supervoxels_normals[neigh_idx], true) > 10.f)
           continue;
 
-        convexity_conf = convexityConfidence(supervoxels_centers[supervoxel_idx],
-                                             supervoxels_centers[neigh_idx],
-                                             supervoxels_normals[supervoxel_idx],
-                                             supervoxels_normals[neigh_idx]);
-
-        // If the connection is convex, segments can be flat or convex to be merged
-        if (convexity_conf >= 0.48 && convexity_bels[voxel_idx] >= 0.45 && convexity_bels[neigh_idx] >= 0.45)
-          queue.push_back(neigh_idx);
-
-        // If the connection is concave, segments have to be concave to be merged
-        if (convexity_conf < 0.48 && convexity_bels[voxel_idx] < 0.45 && convexity_bels[neigh_idx] < 0.45)
-          queue.push_back(neigh_idx);
-
+        // The neighbor is valid, not visited and could be in the same projection
+        queue.push_back(neigh_idx);
+        segment.push_back(neigh_idx);
+        if (!is_processed[neigh_idx])
+          remaining_voxels--;
+        is_processed[neigh_idx] = true;
       }
+    } // --- end while(!queue.empty())
+
+    // if (segment.size() == 1) {
+    //   std::cout << "Segment size 1. Pts nb: " << supervoxels_indices[voxel_idx]->size() << ", Neighbors nb " << valid_supervoxels_adjacency[voxel_idx].size() << " Same proj with neighb: ";
+    //   for (auto neigh_idx : valid_supervoxels_adjacency[voxel_idx])
+    //     std::cout << (voxels_normals[voxel_idx].dot(voxels_normals[neigh_idx]) > cosf(M_PI*12.f/18.f)) << ", ";
+
+    //   std::cout << std::endl;
+    // }
+
+    uint segment_pt_num = 0;
+    for (auto supervoxel_idx : segment)
+      segment_pt_num += supervoxels_indices[supervoxel_idx]->size();
+
+    uint min_segment_pt_num = 30;
+    if (segment_pt_num < min_segment_pt_num) {
+      // Redistribute the supervoxel somehow ?
+      for (auto supervoxel_idx : segment)
+        voxels_validity[supervoxel_idx] = false;
+      sample_idx--;
+      continue;
     }
 
 
     // Overlap
-    std::unordered_map<uint, std::vector<uint> > overlapping_segments;
+    // std::unordered_map<uint, std::vector<uint> > overlapping_segments;
 
-    for (auto supervoxel_idx : segment)
-      for (auto seg_idx : supervoxels_to_segments[supervoxel_idx])
-        overlapping_segments[seg_idx].push_back(supervoxel_idx);
+    // for (auto supervoxel_idx : segment)
+    //   for (auto seg_idx : supervoxels_to_segments[supervoxel_idx])
+    //     overlapping_segments[seg_idx].push_back(supervoxel_idx);
 
-    std::cout << "-------------------------------------------" << std::endl;
-    for (auto p : overlapping_segments) {
-      std::cout << 100.f * static_cast<float>(p.second.size()) / static_cast<float>(segment.size()) << "% with " << p.first << std::endl;
-    }
+
+    // for (auto p : overlapping_segments) {
+    //   float pct_overlap = 100.f * static_cast<float>(p.second.size()) / static_cast<float>(segment.size());
+    //   if (pct_overlap > 95.f) {
+    //     std::cout << "Almost the same:" << std::endl;
+    //     for (auto supervox : segment)
+    //       std::cout << supervox << ", ";
+    //     std::cout << std::endl;
+
+    //     for (auto supervox : segments_to_supervoxels[p.first])
+    //       std::cout << supervox << ", ";
+    //     std::cout << std::endl;
+    //   }
+
+    //   // std::cout << segments_to_supervoxels.size() << " overlaps " << pct_overlap << "% with " << p.first << std::endl;
+    // }
 
     // segments_to_supervoxels.push_back(segment);
     for (auto supervoxel_idx : segment)
@@ -888,29 +1139,6 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
   ScopeTime t("Extract clusters info", debug_);
 
   for (uint seg_idx=0; seg_idx<segments_to_supervoxels.size(); seg_idx++) {
-    Eigen::Vector3f segment_mean = Eigen::Vector3f::Zero();
-    for (auto supervoxel_idx : segments_to_supervoxels[seg_idx])
-      segment_mean += supervoxels_centers[supervoxel_idx] / static_cast<float>(segments_to_supervoxels[seg_idx].size());
-
-    float min_centroid_dist = 1e5f;
-    uint centroid_idx;
-    for (auto supervoxel_idx : segments_to_supervoxels[seg_idx]) {
-      float centroid_dist = (segment_mean - supervoxels_centers[supervoxel_idx]).norm();
-
-      if (centroid_dist < min_centroid_dist) {
-        min_centroid_dist = centroid_dist;
-        centroid_idx = supervoxel_idx;
-      }
-    }
-
-    support_points.push_back((*(supervoxels_indices[centroid_idx]))[0]);
-  }
-
-
-  for (uint seg_idx=0; seg_idx<segments_to_supervoxels.size(); seg_idx++) {
-    std::vector<std::pair<uint, int> > region_grown;
-    region_grown.reserve(100);
-
     pcl::IndicesPtr indices(new std::vector<int>());
     indices->reserve(100);
 
@@ -918,30 +1146,36 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
       indices->insert(indices->end(),
                      (*(supervoxels_indices[supervoxel_idx])).begin(),
                      (*(supervoxels_indices[supervoxel_idx])).end());
-
-      for (auto pt_idx : *(supervoxels_indices[supervoxel_idx])) {
-        auto pair = std::make_pair(pt_idx, 0);
-        region_grown.push_back(pair);
-      }
     }
 
-    if (region_grown.size() < 3)
-      continue;
-
-    std::cout << "Segment " << seg_idx << " nb supervoxels " << segments_to_supervoxels[seg_idx].size() << " np points " << region_grown.size() << std::endl;
+    // if (debug_)
+    //   std::cout << "Segment " << seg_idx << " | nb supervoxels: " << segments_to_supervoxels[seg_idx].size() << ", nb points: " << indices->size() << std::endl;
 
     // --- Get LRF from the region of interest -------------------------------------------------------------------
     Eigen::Matrix3f lrf;
     Eigen::Vector3f mean;
-    normalAlignedPca(indices, lrf, mean);
-    lrf_transforms.push_back(lrf);
+    normalAlignedPca(pc_, indices, lrf, mean);
+
+    Eigen::Vector3f z(0.f, 0.f, 1.f);
+    Eigen::Matrix3f zlrf = Eigen::Matrix3f::Identity();
+    Eigen::Vector3f node_normal = lrf.row(2);
+    node_normal(2) = 0.f;
+    node_normal.normalize();
+    if (std::isnan(node_normal(0)))
+      node_normal << 1., 0., 0.;
+    zlrf.row(0) = node_normal;
+    zlrf.row(1) = z.cross(node_normal);
+    zlrf.row(2) = z;
+
+    lrf_transforms.push_back(zlrf);
     means.push_back(mean);
-    scales.push_back(regionScale(indices, mean));
+    // means.push_back(voxels_centroids[segments_to_supervoxels[seg_idx][0]]);
+    scales.push_back(regionScale(pc_, indices, mean));
     support_regions.push_back(std::move(*indices));
   }
 
 
-  neighbor_indices.resize(support_points.size());
+  neighbor_indices.resize(means.size());
   for (uint seg_idx=0; seg_idx<segments_to_supervoxels.size(); seg_idx++) {
 
     std::unordered_set<uint> neighboring_supervoxels;
@@ -957,95 +1191,10 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
     for (auto seg : neighboring_segments)
       neighbor_indices[seg_idx].push_back(seg);
   }
-
 } // -- end ScopeTime t("Extract clusters info", debug_);
 
-
-
-
-
-  // --- Visualization -------------------------------------------------------------------------------------------
   if (debug_)
-    std::cout << "Seed: " << seed << std::endl;
-
-  srand(seed);
-
-
-
-  // // for (auto& rgb : voxel_colors) {
-  // for (uint voxel_idx=0; voxel_idx < voxel_num; voxel_idx++) {
-  //   auto& rgb = voxel_colors[voxel_idx];
-  //   std::get<0>(rgb) = rand() % 256;
-  //   std::get<1>(rgb) = rand() % 256;
-  //   std::get<2>(rgb) = rand() % 256;
-
-  //   // if (convexity_bels[voxel_idx] > 0.6) {
-  //   //   std::get<0>(rgb) = 0;
-  //   //   std::get<1>(rgb) = 255;
-  //   //   std::get<2>(rgb) = 0;
-  //   // } else if (convexity_bels[voxel_idx] < 0.4) {
-  //   //   std::get<0>(rgb) = 255;
-  //   //   std::get<1>(rgb) = 0;
-  //   //   std::get<2>(rgb) = 0;
-  //   // } else {
-  //   //   std::get<0>(rgb) = 255;
-  //   //   std::get<1>(rgb) = 255;
-  //   //   std::get<2>(rgb) = 255;
-  //   // }
-  // }
-
-  // for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++) {
-
-  //   // if (pt_supervoxel_indices[pt_idx] == 1e5)
-  //   if (pt_merged_voxel_indices[pt_idx] == 1e5)
-  //     continue;
-  //   pcl::PointXYZRGB p;
-  //   p.x = pc_->points[pt_idx].x;
-  //   p.y = pc_->points[pt_idx].y;
-  //   p.z = pc_->points[pt_idx].z;
-
-  //   // if (pt_supervoxel_indices[pt_idx] == 1e5) {
-  //   //   p.r = 255;
-  //   //   p.g = 0;
-  //   //   p.b = 0;
-  //   // } else {
-  //   //   p.r = 255;
-  //   //   p.g = 255;
-  //   //   p.b = 255;
-  //   // }
-  //   // p.r = std::get<0>(voxel_colors[pt_supervoxel_indices[pt_idx]]);
-  //   // p.g = std::get<1>(voxel_colors[pt_supervoxel_indices[pt_idx]]);
-  //   // p.b = std::get<2>(voxel_colors[pt_supervoxel_indices[pt_idx]]);
-
-  //   p.r = std::get<0>(voxel_colors[pt_merged_voxel_indices[pt_idx]]);
-  //   p.g = std::get<1>(voxel_colors[pt_merged_voxel_indices[pt_idx]]);
-  //   p.b = std::get<2>(voxel_colors[pt_merged_voxel_indices[pt_idx]]);
-
-  //   cloud->points.push_back(p);
-  // }
-
-  // for (uint voxel_idx=0; voxel_idx<voxel_num; voxel_idx++) {
-  //   if (!voxels_validity[voxel_idx])
-  //     continue;
-
-  //   PointT p1 = voxels_centers[voxel_idx];
-
-  //   for (auto neigh_idx : supervoxels_adjacency[voxel_idx]) {
-  //     PointT p2 = voxels_centers[neigh_idx];
-  //     viewer->addLine<PointT>(p1, p2, 0., 0., 1., "line_" +std::to_string(voxel_idx)+"_"+std::to_string(neigh_idx));
-  //     // std::cout << "line_" +std::to_string(voxel_idx)+"_"+std::to_string(neigh_idx) << std::endl;
-  //   }
-  // }
-
-  // viewer->addPointCloud<PointT> (pc_, "pc_");
-  // viewer->addPointCloud<pcl::PointXYZRGB> (cloud, "voxels");
-  // while (!viewer->wasStopped()) {
-  //   viewer->spinOnce(100);
-  // }
-
-
-  if (debug_)
-    std::cout << "Sampled " << support_points.size() << " supports points" << std::endl;
+    std::cout << "Sampled " << means.size() << " segments" << std::endl;
 
   return 0;
 }
@@ -1053,143 +1202,81 @@ int GraphConstructor::sampleSupportPoints(std::vector<uint> & support_points,
 
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-// std::pair<Eigen::Matrix3f, Eigen::Vector3f>
-void  GraphConstructor::normalAlignedPca(const pcl::IndicesPtr & indices,
-                                         Eigen::Matrix3f & lrf,
-                                         Eigen::Vector3f & mean) {
+int GraphConstructor::pySampleSegments(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
+                                       int* valid_indices, float* scales, int max_support_point, float neigh_size,
+                                       int neighbors_nb, float shadowing_threshold, int seed, float** regions, uint region_sample_size,
+                                       int disconnect_rate, float* heights) {
 
-  pcl::PCA<PointT> pca;
-  pca.setInputCloud(pc_);
-  pca.setIndices(indices);
+  Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor> > support_points_coords_map(support_points_coords, max_support_point, 3);
+  Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 9, Eigen::RowMajor> > lrf_transforms_map(lrf_transforms, max_support_point, 9);
 
-  // Column ordered eigenvectors, representing the eigenspace cartesian basis (right-handed coordinate system).
-  lrf = pca.getEigenVectors().transpose();
-  mean = pca.getMean().head<3>();
+  std::vector<std::vector<uint> > neighbor_indices;
+  std::vector<Eigen::Matrix3f> lrf_transforms_vec;
+  std::vector<float> scales_vec;
+  std::vector<Eigen::Vector3f> means_vec;
+  std::vector<std::vector<int> > support_regions;
 
-  // // "EYELRF"  : 1
-  // if (lrf_code_ == 1)
-  //   return std::make_pair(Eigen::Matrix3f::Identity(), mean);
+  sampleSegments(neighbor_indices, lrf_transforms_vec, scales_vec, means_vec, support_regions,
+                 max_support_point, neighbors_nb, seed);
 
-  // Align with normals
-  uint sampled_nb = std::min<uint>(static_cast<uint>(100), indices->size());
-  uint plusNormals = 0, pt_idx;
+  // std::cout << "Ok 1" << std::endl;
 
-  for (uint i=0; i<sampled_nb; i++) {
-    pt_idx = (*indices)[i];
-    Eigen::Vector3f n = pc_->points[pt_idx].getNormalVector3fMap();
+  for (uint seg_idx=0; seg_idx < means_vec.size(); seg_idx++) {
+    int random_draw = rand() % 100;
+    if (random_draw < disconnect_rate)
+      continue;
 
-    if (n.dot(lrf.row(2)) > 0.)
-      plusNormals++;
+    // support_points_coords_map.row(seg_idx) = pc_->points[support_points[seg_idx]].getVector3fMap();
+    support_points_coords_map.row(seg_idx) = means_vec[seg_idx];
+
+    // !!! the LRF encoded in lrf_row is the transpose of the one in lrf_transforms_vec
+    // lrf_row is ColumnMajor as is Eigen by default
+    // lrf_transforms_map encodes the transpose of the LRF computed (but that works out for SKPConv)
+    Eigen::Map<Eigen::Matrix3f> lrf_row(lrf_transforms_map.row(seg_idx).data(), 3, 3);
+    lrf_row = lrf_transforms_vec[seg_idx];
+
+    valid_indices[seg_idx] = 1;
+    scales[seg_idx] = scales_vec[seg_idx];
+    heights[seg_idx] = means_vec[seg_idx](2) - min_pt_.z;
   }
 
-  // If less than half aligns, flip the LRF
-  if (2*plusNormals < sampled_nb)
-    lrf.row(2) = -lrf.row(2);
+  // std::cout << "Ok 2" << std::endl;
 
-  // Update the properties of the graph
-  lrf.row(1).matrix () = lrf.row(2).cross (lrf.row(0));
-
-  // // "PCALRF"  : 2
-  // if (lrf_code_ == 2)
-  //   return std::make_pair(lrf, mean);
-
-  // Eigen::Vector3f z(0.f, 0.f, 1.f);
-  // Eigen::Matrix3f zlrf = Eigen::Matrix3f::Identity();
-  // Eigen::Vector3f node_normal = lrf.row(2);
-  // node_normal(2) = 0.f;
-  // node_normal.normalize();
-  // if (std::isnan(node_normal(0)))
-  //   node_normal << 1., 0., 0.;
-  // zlrf.row(0) = node_normal;
-  // zlrf.row(1) = z.cross(node_normal);
-  // zlrf.row(2) = z;
-
-
-  // // "ZLRF"    : 3
-  // if (lrf_code_ == 3)
-  //   return std::make_pair(zlrf, mean);
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-float GraphConstructor::regionScale(const pcl::IndicesPtr & indices,
-                                    Eigen::Vector3f & mean) {
-  float max_dist = 0.f, d;
-
-  for (auto pt : *indices) {
-    d = (pc_->points[pt].getVector3fMap() - mean).norm();
-
-    if (d > max_dist)
-      max_dist = d;
-  }
-
-  return 1. / max_dist;
-}
-
-
-//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void GraphConstructor::searchSupportPointsNeighbors(std::vector<uint> & support_points,
-                                                    std::vector<std::vector<uint> > & neighbor_indices,
-                                                    int* neigh_indices, uint neighbors_nb,
-                                                    float shadowing_threshold, int* valid_indices) {
-
-  float shadowing_threshold_rad = shadowing_threshold * M_PI / 180.;
-  Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> > neigh_indices_map(neigh_indices, support_points.capacity(), neighbors_nb);
-
-  // std::unordered_map<uint, uint> pc_to_support_indices;
-
-  // for (uint support_pt_idx=0; support_pt_idx<support_points.size(); support_pt_idx++) {
-  //   pc_to_support_indices[support_points[support_pt_idx]] = support_pt_idx;
-  // }
-
+  Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> > neigh_indices_map(neigh_indices, max_support_point, neighbors_nb);
   uint pt_idx, max_neigh;
-  for (uint support_pt_idx=0; support_pt_idx<support_points.size(); support_pt_idx++) {
-    if (valid_indices[support_pt_idx] != 1)
+  for (uint seg_idx=0; seg_idx<means_vec.size(); seg_idx++) {
+    if (valid_indices[seg_idx] != 1)
         continue;
 
-    pt_idx = support_points[support_pt_idx];
-    max_neigh = std::min<uint>(neighbor_indices[support_pt_idx].size()+1, neighbors_nb);
+    max_neigh = std::min<uint>(neighbor_indices[seg_idx].size()+1, neighbors_nb);
 
-    neigh_indices_map(support_pt_idx, 0) = support_pt_idx;
+    neigh_indices_map(seg_idx, 0) = seg_idx;
 
     uint neigh_idx = 0;
-    Eigen::Vector3f support_vector = pc_->points[support_points[support_pt_idx]].getVector3fMap();
-    Eigen::Vector3f support_normal = pc_->points[support_points[support_pt_idx]].getNormalVector3fMap();
-
     for (uint i=0; i<max_neigh-1; i++) {
-      // uint neigh_pt_idx = pc_to_support_indices[neighbor_indices[pt_idx][i]];
-      uint neigh_pt_idx = neighbor_indices[support_pt_idx][i];
-      if (valid_indices[neigh_pt_idx] != 1)
+      uint neigh_seg_idx = neighbor_indices[seg_idx][i];
+      if (valid_indices[neigh_seg_idx] != 1)
         continue;
 
-      Eigen::Vector3f neigh_vector = pc_->points[support_points[neigh_pt_idx]].getVector3fMap() - support_vector;
-      neigh_vector.normalize();
-
-      // Is it shadowed by the opposite of the support point normal
-      bool shadowed = false;
-      float angle = acosf(std::max(-1.0f, std::min(1.0f, (neigh_vector.dot(-support_normal)))));
-      if (angle < shadowing_threshold_rad)
-        shadowed = true;
-
-      // Is it shadowed by another neighbor
-      for (uint j=0; j<neigh_idx; j++) {
-        Eigen::Vector3f prev_neigh_vector = pc_->points[support_points[neighbor_indices[support_pt_idx][j]]].getVector3fMap() - support_vector;
-        prev_neigh_vector.normalize();
-        angle = acosf(std::max(-1.0f, std::min(1.0f, (neigh_vector.dot(prev_neigh_vector)))));
-        if (angle < shadowing_threshold_rad)
-          shadowed = true;
-      }
-
-      if (!shadowed) {
-        // neigh_indices_map(support_pt_idx, neigh_idx+1) = pc_to_support_indices[neighbor_indices[pt_idx][i]];
-        neigh_indices_map(support_pt_idx, neigh_idx+1) = neigh_pt_idx;
-        neigh_idx++;
-      }
+      neigh_indices_map(seg_idx, neigh_idx+1) = neigh_seg_idx;
+      neigh_idx++;
     }
-
   }
 
-  // TODO Should I BFS through the graph to get some more neighbors ?
+  // std::cout << "Ok 3" << std::endl;
+
+  for (uint seg_idx=0; seg_idx<means_vec.size(); seg_idx++) {
+    Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor> > region_pts_map(regions[seg_idx], region_sample_size, 3);
+
+    for (uint feat_idx=0; feat_idx < region_sample_size; feat_idx++) {
+      uint rand_idx = rand() % support_regions[seg_idx].size();
+      uint pt_idx = support_regions[seg_idx][rand_idx];
+      Eigen::Vector3f centered_coords = pc_->points[pt_idx].getVector3fMap() - means_vec[seg_idx];
+      region_pts_map.row(feat_idx) = scales[seg_idx] * lrf_transforms_vec[seg_idx] * centered_coords;
+    }
+  }
+  // std::cout << "Ok 4" << std::endl;
+
 }
 
 
@@ -1206,7 +1293,6 @@ void GraphConstructor::vizGraph(int max_support_point, float neigh_size, uint ne
   user_data->graph = this;
   user_data->viewer = viewer.get();
   user_data->max_support_point = max_support_point;
-  user_data->neigh_size = neigh_size;
   user_data->neighbors_nb = neighbors_nb;
 
   viewer->registerKeyboardCallback(keyboardEventOccurred, (void*)user_data.get ());
@@ -1219,7 +1305,7 @@ void GraphConstructor::vizGraph(int max_support_point, float neigh_size, uint ne
   // }
 
   // pcl::visualization::PointCloudColorHandlerRGBField<PointT> rgb(pc_);
-    // viewer->addPointCloud<pcl::PointXYZRGB> (support_pc, rgb, "vertices");
+  // viewer->addPointCloud<pcl::PointXYZRGB> (support_pc, rgb, "vertices");
 
   viewer->addPointCloud<PointT> (pc_, "pc_");
 

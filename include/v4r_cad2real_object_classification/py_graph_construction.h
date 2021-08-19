@@ -38,33 +38,36 @@ protected:
   bool points_with_normals_;
 
 
-  void voxelSeeding(std::unordered_map<int, std::tuple<uint, uint, float> > & voxels_map,
-                         std::vector<uint> & pt_voxel_indices);
-  void voxelAdjacency(std::unordered_map<int, std::tuple<uint, uint, float> > & voxels_map,
+  void voxelSeeding(std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > & voxels_map,
+                    std::vector<uint> & pt_voxel_indices);
+  void voxelAdjacency(std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > & voxels_map,
                        std::vector<std::vector<uint> > & voxels_adjacency,
                        std::vector<Eigen::Vector3f> & voxels_normals);
-  void supervoxelRefinement(std::unordered_map<int, std::tuple<uint, uint, float> > & voxels_map,
+  void supervoxelRefinement(std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > & voxels_map,
                             std::vector<uint> & pt_voxel_indices,
                             std::vector<uint> & pt_supervoxel_indices,
                             std::vector<std::vector<uint> > & voxels_adjacency,
                             std::vector<std::unordered_set<uint> > & supervoxels_adjacency,
                             std::vector<Eigen::Vector3f> & voxels_normals,
                             std::vector<bool> & voxels_validity);
+  void supervoxelAverageConvexity(const std::vector<pcl::IndicesPtr>  & supervoxels_indices,
+                                  const std::vector<bool> & voxels_validity,
+                                  const uint & sampled_pair_num,
+                                  std::vector<double> & average_concavity);
+  void supervoxelConvexAdjacency(const std::vector<std::unordered_set<uint> > & supervoxels_adjacency,
+                                 const std::vector<pcl::IndicesPtr>  & supervoxels_indices,
+                                 const std::vector<bool> & voxels_validity,
+                                 std::vector<Eigen::Vector3f> & supervoxels_centroids,
+                                 std::vector<Eigen::Vector3f> & supervoxels_normals,
+                                 std::vector<std::vector<uint> > & valid_supervoxels_adjacency);
 
   // Internal graph processing
-  void  normalAlignedPca(const pcl::IndicesPtr & indices, Eigen::Matrix3f & lrf, Eigen::Vector3f & mean);
-  float regionScale(const pcl::IndicesPtr & indices, Eigen::Vector3f & mean);
-  void searchSupportPointsNeighbors(std::vector<uint> & support_points,
-                                    std::vector<std::vector<uint> > & neighbor_indices,
-                                    int* neigh_indices, uint neighbors_nb,
-                                    float shadowing_threshold, int* valid_indices);
-  int sampleSupportPoints(std::vector<uint> & support_points,
-                          std::vector<std::vector<uint> > & neighbor_indices,
-                          std::vector<Eigen::Matrix3f> & lrf_transforms,
-                          std::vector<float> & scales,
-                          std::vector<Eigen::Vector3f> & means,
-                          std::vector<std::vector<int> > & support_regions,
-                          float neigh_size, int max_support_point, uint neighbors_nb, int seed);
+  int sampleSegments(std::vector<std::vector<uint> > & neighbor_indices,
+                     std::vector<Eigen::Matrix3f> & lrf_transforms,
+                     std::vector<float> & scales,
+                     std::vector<Eigen::Vector3f> & means,
+                     std::vector<std::vector<int> > & support_regions,
+                     int max_support_point, uint neighbors_nb, int seed);
 
   void normalSmoothing() {
     for (uint i=0; i<pc_->points.size(); i++) {
@@ -100,7 +103,7 @@ public:
       else
         std::cout << "lrf_code: " << lrf << std::endl;
 
-      voxel_size_ = 0.05f;
+      voxel_size_ = 0.04f;
   }
 
   // Initialization
@@ -123,10 +126,10 @@ public:
   };
 
   // Graph processing
-  int sampleSupportPointsAndRegions(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
-                                    int* valid_indices, float* scales, int max_support_point, float neigh_size,
-                                    int neighbors_nb, float shadowing_threshold, int seed, float** regions, uint region_sample_size,
-                                    int disconnect_rate, float* heights);
+  int pySampleSegments(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
+                       int* valid_indices, float* scales, int max_support_point, float neigh_size,
+                       int neighbors_nb, float shadowing_threshold, int seed, float** regions, uint region_sample_size,
+                       int disconnect_rate, float* heights);
 
   // Viz
   void vizGraph(int max_support_point, float neigh_size, uint neighbors_nb);

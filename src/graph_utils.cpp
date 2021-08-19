@@ -157,3 +157,51 @@ inline double convexityConfidence(Eigen::Vector3f x1, Eigen::Vector3f x2,
     local_convexity_measure = (local_convexity_measure + 2.)/4.;
     return std::min(std::max(0.0001, local_convexity_measure), 0.9999);
 }
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+void  normalAlignedPca(const pcl::PointCloud<PointT>::Ptr & pc, const pcl::IndicesPtr & indices,
+                       Eigen::Matrix3f & lrf, Eigen::Vector3f & mean) {
+
+  pcl::PCA<PointT> pca;
+  pca.setInputCloud(pc);
+  pca.setIndices(indices);
+
+  // Column ordered eigenvectors, representing the eigenspace cartesian basis (right-handed coordinate system).
+  lrf = pca.getEigenVectors().transpose();
+  mean = pca.getMean().head<3>();
+
+  // Align with normals
+  uint sampled_nb = std::min<uint>(static_cast<uint>(100), indices->size());
+  uint plusNormals = 0, pt_idx;
+
+  for (uint i=0; i<sampled_nb; i++) {
+    pt_idx = (*indices)[i];
+    Eigen::Vector3f n = pc->points[pt_idx].getNormalVector3fMap();
+
+    if (n.dot(lrf.row(2)) > 0.)
+      plusNormals++;
+  }
+
+  // If less than half aligns, flip the LRF
+  if (2*plusNormals < sampled_nb)
+    lrf.row(2) = -lrf.row(2);
+
+  // Update the properties of the graph
+  lrf.row(1).matrix () = lrf.row(2).cross (lrf.row(0));
+}
+
+
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+float regionScale(const pcl::PointCloud<PointT>::Ptr & pc, const pcl::IndicesPtr & indices,
+                  Eigen::Vector3f & mean) {
+  float max_dist = 0.f, d;
+  for (auto pt : *indices) {
+    d = (pc->points[pt].getVector3fMap() - mean).norm();
+
+    if (d > max_dist)
+      max_dist = d;
+  }
+
+  return 1. / max_dist;
+}
