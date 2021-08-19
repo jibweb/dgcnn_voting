@@ -8,7 +8,6 @@ from ScanNet import ScanNet, CLASS_DICT as SN_CLASS_DICT
 from ScanObjectNN import ScanObjectNN, ScanObjectNN_T25, ScanObjectNN_T50_RS, CLASS_DICT as SONN_CLASS_DICT
 from ScanObjectNN import ScanObjectNNToModelNet, ScanObjectNN_T25ToModelNet, ScanObjectNN_T50_RSToModelNet, CLASS_DICT_COMBINED as SONN_CLASS_DICT_COMBINED
 from ShapeNetSem import ShapeNetSemToScanNetDet, CLASS_DICT as SNS_CLASS_DICT
-from ThreeDNet import ThreeDNet, CLASS_DICT as TDN_CLASS_DICT
 
 
 DATASETS = Enum("DATASET", ["ModelNet10PCD",
@@ -30,8 +29,7 @@ DATASETS = Enum("DATASET", ["ModelNet10PCD",
                             "ScanObjectNN_T25ToModelNet",
                             "ScanObjectNN_T50_RSToModelNet",
                             "ShapeNetSemToScanNetDet",
-
-                            "ThreeDNet"])
+                            ])
 
 
 def get_dataset(dataset_name):
@@ -62,8 +60,6 @@ def get_dataset(dataset_name):
         DATASETS.ScanObjectNNToModelNet: (ScanObjectNNToModelNet, SONN_CLASS_DICT_COMBINED),
         DATASETS.ScanObjectNN_T25ToModelNet: (ScanObjectNN_T25ToModelNet, SONN_CLASS_DICT_COMBINED),
         DATASETS.ScanObjectNN_T50_RSToModelNet: (ScanObjectNN_T50_RSToModelNet, SONN_CLASS_DICT_COMBINED),
-
-        DATASETS.ThreeDNet: (ThreeDNet, TDN_CLASS_DICT),
     }
 
     try:

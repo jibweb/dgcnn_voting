@@ -963,7 +963,8 @@ int GraphConstructor::sampleSegments(std::vector<std::vector<uint> > & neighbor_
 
   }
 
-  std::cout << "Valid voxels: " << valid_voxels_num << std::endl;
+  if (debug_)
+    std::cout << "Valid voxels: " << valid_voxels_num << std::endl;
 
 
   // --- Supervoxel convexity ------------------------------------------------------------------------------------
