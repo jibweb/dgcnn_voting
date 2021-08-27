@@ -260,10 +260,23 @@ void GraphConstructor::initializeArray(float* vertices, uint vertex_nb,
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void GraphConstructor::dataAugmentation(bool normal_smoothing, float normal_occlusion, float normal_noise) {
+void GraphConstructor::dataAugmentation(bool rescaling, bool z_rotation, bool normal_smoothing,
+                                        float normal_occlusion, float normal_noise) {
   ScopeTime t("Data Augmentation", debug_);
 
-  bool z_rotation = false;
+  if (rescaling) {
+    float max_norm = 0.;
+    for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++) {
+      float pt_norm = (pc_->points[pt_idx].getVector3fMap() - centroid_.head<3>()).norm();
+
+      if (pt_norm > max_norm)
+        max_norm = pt_norm;
+    }
+
+    for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++)
+      pc_->points[pt_idx].getVector3fMap() /= max_norm;
+  }
+
   if (z_rotation) {
     struct timeval time;
     gettimeofday(&time,NULL);
@@ -278,9 +291,7 @@ void GraphConstructor::dataAugmentation(bool normal_smoothing, float normal_occl
                   0,              0,               0, 1;
 
     pcl::transformPointCloudWithNormals(*pc_, *pc_, rotation_z);
-    updateCloudBbox();
   }
-
 
   if (normal_smoothing)
     normalSmoothing();
@@ -322,6 +333,11 @@ void GraphConstructor::dataAugmentation(bool normal_smoothing, float normal_occl
       pc_->points[i].getNormalVector3fMap().normalize();
     }
   }
+
+  if ((normal_occlusion > -1.f) || rescaling || z_rotation) {
+    updateCloudBbox();
+  }
+
 }
 
 

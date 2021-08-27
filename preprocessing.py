@@ -38,6 +38,8 @@ p.define("data_augmentation", True)
 p.define("normal_noise", 0.)
 p.define("normal_smoothing", False)
 p.define("normal_occlusion", -2.)
+p.define("rescaling", False)
+p.define("z_rotation", False)
 
 p.define("debug", False)
 
@@ -76,7 +78,9 @@ def graph_prepare(fn, debug, lrf_code, wnormals, no_bg, height_to_zero):
 def graph_process(fn, p, with_fn, lrf):
     graph = graph_prepare(fn, p.debug, lrf[p.lrf].value, p.wnormals, p.sonn_no_bg, p.height_to_zero)
     if p.data_augmentation:
-        graph.data_augmentation(normal_smoothing=p.normal_smoothing,
+        graph.data_augmentation(rescaling=p.rescaling,
+                                z_rotation=p.z_rotation,
+                                normal_smoothing=p.normal_smoothing,
                                 normal_occlusion=p.normal_occlusion,
                                 normal_noise=p.normal_noise)
 

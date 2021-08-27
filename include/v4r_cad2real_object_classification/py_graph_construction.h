@@ -113,7 +113,7 @@ public:
   void initializeArray(float* vertices, uint vertex_nb, int* triangles, uint triangle_nb);
   void initializeArray(float* vertices, uint vertex_nb, int* triangles, uint triangle_nb, float* normals);
 
-  void dataAugmentation(bool normal_smoothing, float normal_occlusion, float normal_noise);
+  void dataAugmentation(bool rescaling, bool z_rotation, bool normal_smoothing, float normal_occlusion, float normal_noise);
   void getBbox(float* bbox) {
     // Center
     bbox[0] = centroid_(0);

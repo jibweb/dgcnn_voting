@@ -31,7 +31,7 @@ cdef extern from "v4r_cad2real_object_classification/py_graph_construction.h":
         void initializeScanObjectNN(string filename, string filename_adj, int filter_class_idx, bool height_to_zero)
         void initializeArray(float* vertices, unsigned int vertex_nb, int* triangles, unsigned int triangle_nb)
         void initializeArray(float* vertices, unsigned int vertex_nb, int* triangles, unsigned int triangle_nb, float* normals)
-        void dataAugmentation(bool normal_smoothing, float normal_occlusion, float normal_noise)
+        void dataAugmentation(bool rescaling, bool z_rotation, bool normal_smoothing, float normal_occlusion, float normal_noise)
         void getBbox(float* bbox)
         int pySampleSegments(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
                              int* valid_indices, float* scales, int max_support_point, float neigh_size,
@@ -74,10 +74,12 @@ cdef class PyGraph:
                                          &triangles[0, 0], triangles.shape[0])
 
     def data_augmentation(self,
+                          rescaling=False,
+                          z_rotation=False,
                           normal_smoothing=False,
                           float normal_occlusion=-2.,
                           float normal_noise=0.):
-        self.c_graph.dataAugmentation(normal_smoothing, normal_occlusion, normal_noise)
+        self.c_graph.dataAugmentation(rescaling, z_rotation, normal_smoothing, normal_occlusion, normal_noise)
 
     # def sample_support_points(self, float neigh_size,
     #                           int max_support_point=1024,
