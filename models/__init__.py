@@ -4,6 +4,7 @@ from utils.params import params as p
 from base_model import LOCAL_FEATS_BLOCK, FEATS_COMBI_BLOCK, POOLING_BLOCK
 from GAT import GAT
 from SKP_KPConv import SKP_KPConv
+from EdgeConv import EdgeConv
 
 
 # # Dropout prob params
@@ -53,6 +54,12 @@ def get_model(local_feats, feats_combi, pooling):
 
     if feats_combi == FEATS_COMBI_BLOCK.GAT:
         return partial(GAT,
+                       local_feats=local_feats,
+                       feats_combi=feats_combi,
+                       pooling=pooling)
+
+    if feats_combi == FEATS_COMBI_BLOCK.EdgeConv:
+        return partial(EdgeConv,
                        local_feats=local_feats,
                        feats_combi=feats_combi,
                        pooling=pooling)

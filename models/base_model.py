@@ -11,7 +11,7 @@ LOCAL_FEATS_BLOCK = Enum("LOCAL_FEATS_BLOCK",
                          ["PointNet",])
 
 FEATS_COMBI_BLOCK = Enum("FEATS_COMBI_BLOCK",
-                         ["KPConv", "SKPConv", "GAT"])
+                         ["KPConv", "SKPConv", "GAT", "EdgeConv"])
 
 POOLING_BLOCK = Enum("POOLING_BLOCK",
                      ["MaxPool", "SingleNode", "VoteMaxPool"])
@@ -74,8 +74,8 @@ class Model(object):
                                                   (None, 3),
                                                   name="bbox_centers_gt")
             self.bbox_extent_gt = tf.placeholder(tf.float32,
-                                                  (None, 3),
-                                                  name="bbox_extent_gt")
+                                                 (None, 3),
+                                                 name="bbox_extent_gt")
 
         self.y = tf.placeholder(tf.float32,
                                 [None, p.num_classes],
