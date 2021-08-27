@@ -21,11 +21,12 @@ for l in LRFS:
 p.define("max_support_point", 1024)
 p.define("neigh_size", 100.)
 p.define("neigh_nb", 30)
+p.define("fill_neighbors_w_self", False)
 p.define("region_sample_size", 64)
 p.define("wnormals", False)
 p.define("wregions", True)
 p.define("lrf", "PCALRF")
-p.define("shadowing_threshold", 10.)
+# p.define("shadowing_threshold", 10.)
 p.define("disconnect_rate", 0.)
 p.define("bias_mat", False)
 # p.define("keep_scaled_parts", False)
@@ -88,7 +89,7 @@ def graph_process(fn, p, with_fn, lrf):
         res = graph.sample_support_points_and_regions(p.neigh_size,
                                                       max_support_point=p.max_support_point,
                                                       neighbors_nb=p.neigh_nb,
-                                                      shadowing_threshold=p.shadowing_threshold,
+                                                      fill_neighbors_w_self=p.fill_neighbors_w_self,
                                                       region_sample_size=p.region_sample_size,
                                                       disconnect_rate=int(100*p.disconnect_rate))
     else:

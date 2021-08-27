@@ -1233,7 +1233,7 @@ int GraphConstructor::sampleSegments(std::vector<std::vector<uint> > & neighbor_
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 int GraphConstructor::pySampleSegments(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
                                        int* valid_indices, float* scales, int max_support_point, float neigh_size,
-                                       int neighbors_nb, float shadowing_threshold, int seed, float** regions, uint region_sample_size,
+                                       int neighbors_nb, bool fill_neighbors_w_self, int seed, float** regions, uint region_sample_size,
                                        int disconnect_rate, float* heights) {
 
   Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor> > support_points_coords_map(support_points_coords, max_support_point, 3);
@@ -1273,12 +1273,18 @@ int GraphConstructor::pySampleSegments(float* support_points_coords, int* neigh_
 
   Eigen::Map<Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> > neigh_indices_map(neigh_indices, max_support_point, neighbors_nb);
   uint pt_idx, max_neigh;
+
+  if (fill_neighbors_w_self) {
+    for (uint seg_idx=0; seg_idx<max_support_point; seg_idx++)
+      for (uint i=0; i<neighbors_nb; i++)
+        neigh_indices_map(seg_idx, i) = seg_idx;
+  }
+
   for (uint seg_idx=0; seg_idx<means_vec.size(); seg_idx++) {
     if (valid_indices[seg_idx] != 1)
         continue;
 
     max_neigh = std::min<uint>(neighbor_indices[seg_idx].size()+1, neighbors_nb);
-
     neigh_indices_map(seg_idx, 0) = seg_idx;
 
     uint neigh_idx = 0;

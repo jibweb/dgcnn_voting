@@ -35,7 +35,7 @@ cdef extern from "v4r_cad2real_object_classification/py_graph_construction.h":
         void getBbox(float* bbox)
         int pySampleSegments(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
                              int* valid_indices, float* scales, int max_support_point, float neigh_size,
-                             int neighbors_nb, float shadowing_threshold, int seed, float** regions, unsigned int region_sample_size,
+                             int neighbors_nb, bool fill_neighbors_w_self, int seed, float** regions, unsigned int region_sample_size,
                              int disconnect_rate, float* heights)
         void vizGraph(int max_support_point, float neigh_size, unsigned int neighbors_nb)
 
@@ -137,7 +137,7 @@ cdef class PyGraph:
     def sample_support_points_and_regions(self, float neigh_size,
                                           int max_support_point=1024,
                                           int neighbors_nb=3,
-                                          float shadowing_threshold=10.,
+                                          bool fill_neighbors_w_self=False,
                                           int region_sample_size=64,
                                           int disconnect_rate=0,
                                           int seed=-1):
@@ -193,7 +193,7 @@ cdef class PyGraph:
             max_support_point,
             neigh_size,
             neighbors_nb,
-            shadowing_threshold,
+            fill_neighbors_w_self,
             cseed,
             feats2d_ptr,
             region_sample_size,

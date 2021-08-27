@@ -128,7 +128,7 @@ public:
   // Graph processing
   int pySampleSegments(float* support_points_coords, int* neigh_indices, float* lrf_transforms,
                        int* valid_indices, float* scales, int max_support_point, float neigh_size,
-                       int neighbors_nb, float shadowing_threshold, int seed, float** regions, uint region_sample_size,
+                       int neighbors_nb, bool fill_neighbors_w_self, int seed, float** regions, uint region_sample_size,
                        int disconnect_rate, float* heights);
 
   // Viz
