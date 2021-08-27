@@ -1157,18 +1157,30 @@ int GraphConstructor::sampleSegments(std::vector<std::vector<uint> > & neighbor_
     Eigen::Vector3f mean;
     normalAlignedPca(pc_, indices, lrf, mean);
 
-    Eigen::Vector3f z(0.f, 0.f, 1.f);
-    Eigen::Matrix3f zlrf = Eigen::Matrix3f::Identity();
-    Eigen::Vector3f node_normal = lrf.row(2);
-    node_normal(2) = 0.f;
-    node_normal.normalize();
-    if (std::isnan(node_normal(0)))
-      node_normal << 1., 0., 0.;
-    zlrf.row(0) = node_normal;
-    zlrf.row(1) = z.cross(node_normal);
-    zlrf.row(2) = z;
+    // "EYELRF"  : 1
+    if (lrf_code_ == 1) {
+      lrf_transforms.push_back(Eigen::Matrix3f::Identity());
+    }
+    // "PCALRF"  : 2
+    else if (lrf_code_ == 2) {
+      lrf_transforms.push_back(lrf);
+    }
+    // "ZLRF"  : 2
+    else if (lrf_code_ == 3) {
+      Eigen::Vector3f z(0.f, 0.f, 1.f);
+      Eigen::Matrix3f zlrf = Eigen::Matrix3f::Identity();
+      Eigen::Vector3f node_normal = lrf.row(2);
+      node_normal(2) = 0.f;
+      node_normal.normalize();
+      if (std::isnan(node_normal(0)))
+        node_normal << 1., 0., 0.;
+      zlrf.row(0) = node_normal;
+      zlrf.row(1) = z.cross(node_normal);
+      zlrf.row(2) = z;
 
-    lrf_transforms.push_back(zlrf);
+      lrf_transforms.push_back(zlrf);
+    }
+
     means.push_back(mean);
     // means.push_back(voxels_centroids[segments_to_supervoxels[seg_idx][0]]);
     scales.push_back(regionScale(pc_, indices, mean));
