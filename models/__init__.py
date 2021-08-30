@@ -19,6 +19,8 @@ p.define("attention_heads", [8, 8, 8, 8, 8, 8])
 p.define("local_feats_layers", [16, 16, 32, 256])
 
 p.define("with_height", False)
+p.define("with_rel_scales", False)
+p.define("with_rescaled_pos", False)
 p.define("num_cluster", 1)
 p.define("group_radius", 0.1)
 p.define("with_bbox", False)

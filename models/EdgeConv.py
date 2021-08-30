@@ -3,11 +3,10 @@ import tensorflow as tf
 from utils.tf import define_scope, conv2d_bn
 from utils.params import params as p
 
-from layers import attn_head
-from base_model import Model, FEATS_COMBI_BLOCK
+from base_model import Model
 
 
-def get_rel_position(point_cloud, nn_idx, k=20):
+def get_rel_features(point_cloud, nn_idx, k=20):
     """Construct edge feature for each point
     Args:
     point_cloud: (batch_size, num_points, 1, num_dims)
@@ -30,8 +29,7 @@ def get_rel_position(point_cloud, nn_idx, k=20):
 
     point_cloud_central = tf.tile(point_cloud_central, [1, 1, k, 1])
 
-    return point_cloud_neighbors - point_cloud_central
-
+    return point_cloud_neighbors, point_cloud_central
 
 
 def get_edge_feature(point_cloud, nn_idx, k=20):
@@ -55,7 +53,6 @@ def get_edge_feature(point_cloud, nn_idx, k=20):
     # print "get_edge_feature/A-nn_idx:",  nn_idx.get_shape()
     # print "get_edge_feature/A-point_cloud_central:",  point_cloud_central.get_shape()
 
-
     point_cloud_shape = point_cloud.get_shape()
     # batch_size = point_cloud_shape[0].value
     num_points = point_cloud_shape[1].value
@@ -71,7 +68,9 @@ def get_edge_feature(point_cloud, nn_idx, k=20):
 
     point_cloud_central = tf.tile(point_cloud_central, [1, 1, k, 1])
 
-    edge_feature = tf.concat([point_cloud_central, point_cloud_neighbors-point_cloud_central], axis=-1)
+    edge_feature = tf.concat([point_cloud_central,
+                              point_cloud_neighbors-point_cloud_central],
+                             axis=-1)
     return edge_feature
 
 
@@ -79,15 +78,15 @@ class EdgeConv(Model):
     def __init__(self, local_feats, feats_combi, pooling,
                  bn_decay=None):
         super(EdgeConv, self).__init__(local_feats=local_feats,
-                                  feats_combi=feats_combi,
-                                  pooling=pooling,
-                                  bn_decay=bn_decay)
+                                       feats_combi=feats_combi,
+                                       pooling=pooling,
+                                       bn_decay=bn_decay)
 
         self.neighbor_indices = tf.placeholder(tf.int32,
-                                       [None,
-                                        p.max_support_point,
-                                        p.neigh_nb],
-                                       name="neighbor_indices")
+                                               [None,
+                                                p.max_support_point,
+                                                p.neigh_nb],
+                                               name="neighbor_indices")
 
         if not p.fill_neighbors_w_self:
             raise Exception("EdgeConv model requires fill_neighbors_w_self")
@@ -129,9 +128,23 @@ class EdgeConv(Model):
         feats_combi = local_feats
         print "feats_combi/IN:",  feats_combi.get_shape()
 
-        rel_position = get_rel_position(tf.reshape(self.support_pts, [-1, p.max_support_point, 1, 3]),
-                                        nn_idx=self.neighbor_indices,
-                                        k=p.neigh_nb)
+        neigh_pos, central_pos = get_rel_features(
+            tf.reshape(self.support_pts, [-1, p.max_support_point, 1, 3]),
+            nn_idx=self.neighbor_indices, k=p.neigh_nb)
+        rel_position = neigh_pos - central_pos
+
+        if p.with_rel_scales:
+            neigh_scales, central_scales = get_rel_features(
+                tf.reshape(self.scales, [-1, p.max_support_point, 1, 1]),
+                nn_idx=self.neighbor_indices, k=p.neigh_nb)
+            central_scales += 1e-5
+            rel_scales = neigh_scales / central_scales
+
+        if p.with_rescaled_pos:
+            scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
+            scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
+            scales += 1e-5
+            rel_position /= scales
 
         with tf.variable_scope('feats_combi'):
             for i in range(len(p.feats_combi_layers)):
@@ -140,24 +153,30 @@ class EdgeConv(Model):
                         feats_combi,
                         nn_idx=self.neighbor_indices,
                         k=p.neigh_nb)
-                    edge_feature = tf.concat([edge_feature, rel_position], axis=-1)
+                    if p.with_rel_scales:
+                        edge_feature = tf.concat([edge_feature,
+                                                  rel_position,
+                                                  rel_scales],
+                                                 axis=-1)
+                    else:
+                        edge_feature = tf.concat([edge_feature,
+                                                  rel_position],
+                                                 axis=-1)
                     feats_combi = conv2d_bn(edge_feature,
                                             p.feats_combi_layers[i],
-                                            [1,1],
+                                            [1, 1],
                                             p.reg_constant,
                                             self.is_training,
                                             'edgeconv_' + str(i),
                                             bn_decay=self.bn_decay)
-                    feats_combi = tf.reduce_max(feats_combi, axis=-2, keep_dims=True)
+                    feats_combi = tf.reduce_max(feats_combi, axis=-2,
+                                                keep_dims=True)
 
         print "feats_combi/OUT:",  feats_combi.get_shape()
 
         # --- Pooling ---------------------------------------------------------
         return self.get_pooling(feats_combi)
 
-
-
     @define_scope
     def loss(self):
         return self.get_base_loss()
-
