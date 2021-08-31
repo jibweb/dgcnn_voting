@@ -65,3 +65,9 @@ def get_model(local_feats, feats_combi, pooling):
                        local_feats=local_feats,
                        feats_combi=feats_combi,
                        pooling=pooling)
+    if feats_combi == FEATS_COMBI_BLOCK.DynEdgeConv:
+        return partial(EdgeConv,
+                       local_feats=local_feats,
+                       feats_combi=feats_combi,
+                       pooling=pooling,
+                       dynamic_graph=True)

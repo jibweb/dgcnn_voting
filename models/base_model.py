@@ -11,7 +11,7 @@ LOCAL_FEATS_BLOCK = Enum("LOCAL_FEATS_BLOCK",
                          ["PointNet",])
 
 FEATS_COMBI_BLOCK = Enum("FEATS_COMBI_BLOCK",
-                         ["KPConv", "SKPConv", "GAT", "EdgeConv"])
+                         ["KPConv", "SKPConv", "GAT", "EdgeConv", "DynEdgeConv"])
 
 POOLING_BLOCK = Enum("POOLING_BLOCK",
                      ["MaxPool", "SingleNode", "VoteMaxPool"])

@@ -6,6 +6,42 @@ from utils.params import params as p
 from base_model import Model
 
 
+def pairwise_distance(point_cloud):
+  """Compute pairwise distance of a point cloud.
+
+  Args:
+    point_cloud: tensor (batch_size, num_points, num_dims)
+
+  Returns:
+    pairwise distance: (batch_size, num_points, num_points)
+  """
+  # og_batch_size = point_cloud.get_shape().as_list()[0]
+  # point_cloud = tf.squeeze(point_cloud)
+  # if og_batch_size == 1:
+  #   point_cloud = tf.expand_dims(point_cloud, 0)
+
+  point_cloud_transpose = tf.transpose(point_cloud, perm=[0, 2, 1])
+  point_cloud_inner = tf.matmul(point_cloud, point_cloud_transpose)
+  point_cloud_inner = -2*point_cloud_inner
+  point_cloud_square = tf.reduce_sum(tf.square(point_cloud), axis=-1, keep_dims=True)
+  point_cloud_square_tranpose = tf.transpose(point_cloud_square, perm=[0, 2, 1])
+  return point_cloud_square + point_cloud_inner + point_cloud_square_tranpose
+
+
+def knn(adj_matrix, k=20):
+  """Get KNN based on the pairwise distance.
+  Args:
+    pairwise distance: (batch_size, num_points, num_points)
+    k: int
+
+  Returns:
+    nearest neighbors: (batch_size, num_points, k)
+  """
+  neg_adj = -adj_matrix
+  _, nn_idx = tf.nn.top_k(neg_adj, k=k)
+  return nn_idx
+
+
 def get_rel_features(point_cloud, nn_idx, k=20):
     """Construct edge feature for each point
     Args:
@@ -75,7 +111,7 @@ def get_edge_feature(point_cloud, nn_idx, k=20):
 
 
 class EdgeConv(Model):
-    def __init__(self, local_feats, feats_combi, pooling,
+    def __init__(self, local_feats, feats_combi, pooling, dynamic_graph=False,
                  bn_decay=None):
         super(EdgeConv, self).__init__(local_feats=local_feats,
                                        feats_combi=feats_combi,
@@ -90,6 +126,8 @@ class EdgeConv(Model):
 
         if not p.fill_neighbors_w_self:
             raise Exception("EdgeConv model requires fill_neighbors_w_self")
+
+        self.dynamic_graph = dynamic_graph
 
         # --- Model properties ------------------------------------------------
         self.inference
@@ -113,6 +151,30 @@ class EdgeConv(Model):
 
         return feed_dict
 
+
+    def get_relative_features(self, nn_idx):
+        neigh_pos, central_pos = get_rel_features(
+            tf.reshape(self.support_pts, [-1, p.max_support_point, 1, 3]),
+            nn_idx=nn_idx, k=p.neigh_nb)
+        rel_position = neigh_pos - central_pos
+
+        if p.with_rescaled_pos:
+            scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
+            scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
+            scales += 1e-5
+            rel_position /= scales
+
+        if p.with_rel_scales:
+            neigh_scales, central_scales = get_rel_features(
+                tf.reshape(self.scales, [-1, p.max_support_point, 1, 1]),
+                nn_idx=nn_idx, k=p.neigh_nb)
+            central_scales += 1e-5
+            rel_scales = neigh_scales / central_scales
+
+            return [rel_position, rel_scales]
+        else:
+            return [rel_position]
+
     @define_scope
     def inference(self):
         """ This is the forward calculation from x to y """
@@ -128,40 +190,36 @@ class EdgeConv(Model):
         feats_combi = local_feats
         print "feats_combi/IN:",  feats_combi.get_shape()
 
-        neigh_pos, central_pos = get_rel_features(
-            tf.reshape(self.support_pts, [-1, p.max_support_point, 1, 3]),
-            nn_idx=self.neighbor_indices, k=p.neigh_nb)
-        rel_position = neigh_pos - central_pos
+        # neigh_pos, central_pos = get_rel_features(
+        #     tf.reshape(self.support_pts, [-1, p.max_support_point, 1, 3]),
+        #     nn_idx=self.neighbor_indices, k=p.neigh_nb)
+        # rel_position = neigh_pos - central_pos
 
-        if p.with_rel_scales:
-            neigh_scales, central_scales = get_rel_features(
-                tf.reshape(self.scales, [-1, p.max_support_point, 1, 1]),
-                nn_idx=self.neighbor_indices, k=p.neigh_nb)
-            central_scales += 1e-5
-            rel_scales = neigh_scales / central_scales
+        # if p.with_rel_scales:
+        #     neigh_scales, central_scales = get_rel_features(
+        #         tf.reshape(self.scales, [-1, p.max_support_point, 1, 1]),
+        #         nn_idx=self.neighbor_indices, k=p.neigh_nb)
+        #     central_scales += 1e-5
+        #     rel_scales = neigh_scales / central_scales
 
-        if p.with_rescaled_pos:
-            scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
-            scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
-            scales += 1e-5
-            rel_position /= scales
+        # if p.with_rescaled_pos:
+        #     scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
+        #     scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
+        #     scales += 1e-5
+        #     rel_position /= scales
+
+        nn_idx = self.neighbor_indices
+        relative_features = self.get_relative_features(nn_idx)
 
         with tf.variable_scope('feats_combi'):
             for i in range(len(p.feats_combi_layers)):
                 with tf.variable_scope('edgeconv_' + str(i)):
                     edge_feature = get_edge_feature(
                         feats_combi,
-                        nn_idx=self.neighbor_indices,
+                        nn_idx=nn_idx,
                         k=p.neigh_nb)
-                    if p.with_rel_scales:
-                        edge_feature = tf.concat([edge_feature,
-                                                  rel_position,
-                                                  rel_scales],
-                                                 axis=-1)
-                    else:
-                        edge_feature = tf.concat([edge_feature,
-                                                  rel_position],
-                                                 axis=-1)
+                    edge_feature = tf.concat([edge_feature] + relative_features,
+                                             axis=-1)
                     feats_combi = conv2d_bn(edge_feature,
                                             p.feats_combi_layers[i],
                                             [1, 1],
@@ -171,6 +229,14 @@ class EdgeConv(Model):
                                             bn_decay=self.bn_decay)
                     feats_combi = tf.reduce_max(feats_combi, axis=-2,
                                                 keep_dims=True)
+
+                    if self.dynamic_graph:
+                        adj_matrix = pairwise_distance(
+                            tf.reshape(feats_combi,
+                                       [-1, p.max_support_point,
+                                        p.feats_combi_layers[i]]))
+                        nn_idx = knn(adj_matrix, k=p.neigh_nb)
+                        relative_features = self.get_relative_features(nn_idx)
 
         print "feats_combi/OUT:",  feats_combi.get_shape()
 
