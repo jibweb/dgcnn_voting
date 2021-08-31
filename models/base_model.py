@@ -315,13 +315,14 @@ class Model(object):
 
         # --- Classification --------------------------------------------------
         with tf.variable_scope('classification'):
-            fcls = fc_bn(pooling_feats, p.feats_combi_layers[-1],
+            fcls = fc_bn(pooling_feats, p.clf_layers[0],
                          scope='fc_1',
                          is_training=self.is_training,
                          bn_decay=self.bn_decay,
                          reg_constant=p.reg_constant)
+            fcls = tf.nn.dropout(fcls, 1.0 - self.pool_drop)
 
-            fcls = fc_bn(fcls, p.feats_combi_layers[-1],
+            fcls = fc_bn(fcls, p.clf_layers[1],
                          scope='fc_2',
                          is_training=self.is_training,
                          bn_decay=self.bn_decay,

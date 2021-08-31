@@ -162,7 +162,7 @@ class EdgeConv(Model):
             scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
             scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
             scales += 1e-5
-            rel_position /= scales
+            rel_position *= scales
 
         if p.with_rel_scales:
             neigh_scales, central_scales = get_rel_features(
@@ -230,6 +230,8 @@ class EdgeConv(Model):
                     feats_combi = tf.reduce_max(feats_combi, axis=-2,
                                                 keep_dims=True)
 
+                    multiscale_feats.append(feats_combi)
+
                     if self.dynamic_graph:
                         adj_matrix = pairwise_distance(
                             tf.reshape(feats_combi,
@@ -237,6 +239,12 @@ class EdgeConv(Model):
                                         p.feats_combi_layers[i]]))
                         nn_idx = knn(adj_matrix, k=p.neigh_nb)
                         relative_features = self.get_relative_features(nn_idx)
+
+        print multiscale_feats
+
+        feats_combi = conv2d(tf.concat(multiscale_feats, axis=-1), 1024,
+                             [1, 1], p.reg_constant, self.is_training
+                             'edgeconv_agg', bn_decay=self.bn_decay)
 
         print "feats_combi/OUT:",  feats_combi.get_shape()
 
