@@ -210,6 +210,7 @@ class EdgeConv(Model):
 
         nn_idx = self.neighbor_indices
         relative_features = self.get_relative_features(nn_idx)
+        multiscale_feats = []
 
         with tf.variable_scope('feats_combi'):
             for i in range(len(p.feats_combi_layers)):
@@ -240,11 +241,12 @@ class EdgeConv(Model):
                         nn_idx = knn(adj_matrix, k=p.neigh_nb)
                         relative_features = self.get_relative_features(nn_idx)
 
-        print multiscale_feats
+        feats_combi = conv2d_bn(tf.concat(multiscale_feats, axis=-1), 1024,
+                                [1, 1], p.reg_constant, self.is_training,
+                                'edgeconv_agg', bn_decay=self.bn_decay)
 
-        feats_combi = conv2d(tf.concat(multiscale_feats, axis=-1), 1024,
-                             [1, 1], p.reg_constant, self.is_training
-                             'edgeconv_agg', bn_decay=self.bn_decay)
+        feats_combi = tf.reshape(feats_combi,
+                                 [-1, p.max_support_point, 1024])
 
         print "feats_combi/OUT:",  feats_combi.get_shape()
 

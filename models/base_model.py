@@ -57,17 +57,17 @@ class Model(object):
                                         name="valid_pts")
 
         self.scales = tf.placeholder(tf.float32,
-                                        (None,
-                                         p.max_support_point,
-                                         1),
-                                        name="scales")
+                                     (None,
+                                      p.max_support_point,
+                                      1),
+                                     name="scales")
 
         if p.with_height:
             self.heights = tf.placeholder(tf.float32,
-                                        (None,
-                                         p.max_support_point,
-                                         1),
-                                        name="heights")
+                                          (None,
+                                           p.max_support_point,
+                                           1),
+                                          name="heights")
 
         if p.with_bbox:
             self.bbox_centers_gt = tf.placeholder(tf.float32,
@@ -82,8 +82,8 @@ class Model(object):
                                 name="y")
 
         self.mask = tf.placeholder(tf.float32,
-                                       [None],
-                                       name="mask")
+                                   [None],
+                                   name="mask")
 
         self.is_training = tf.placeholder(tf.bool, name="is_training")
         self.pool_drop = tf.placeholder(tf.float32, name="pool_drop_prob")
@@ -177,10 +177,11 @@ class Model(object):
 
             if self.pooling_block == POOLING_BLOCK.MaxPool:
                 with tf.variable_scope('maxpool'):
-                    pooling_feats = tf.reshape(pooling_feats,
-                                               [-1, p.max_support_point,
-                                                p.feats_combi_layers[-1]])
+                    # pooling_feats = tf.reshape(pooling_feats,
+                    #                            [-1, p.max_support_point,
+                    #                             p.feats_combi_layers[-1]])
 
+                    # Expects [batch_size, p.max_support_point, feat_dim]
                     # Zeroing-out the features of the invalid points
                     pooling_feats = tf.multiply(pooling_feats, self.valid_pts)
                     pooling_feats = tf.reduce_max(pooling_feats, axis=1, name='max_pool')
@@ -207,7 +208,6 @@ class Model(object):
                     #      tf.constant(np.zeros((p.batch_size, p.max_support_point, 1),
                     #                  dtype=np.float32))],
                     #     -1)
-
 
                     # Put all the votes together far away
                     # This ensures farthest_point_sampling will group them
@@ -268,9 +268,9 @@ class Model(object):
                                                        p.reg_constant)
 
                             pn_pool_feats = tf.reduce_max(pn_pool_feats, axis=2,
-                                                        name='max_g')
+                                                          name='max_g')
                             pn_pool_feats = tf.reshape(pn_pool_feats,
-                                               [-1, pn_pool_layers[-1]])
+                                                       [-1, pn_pool_layers[-1]])
                             bbox_preds = fc_bn(pn_pool_feats, pn_pool_layers[-1],
                                                scope='bbox_pred_1',
                                                is_training=self.is_training,
