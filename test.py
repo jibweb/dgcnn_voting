@@ -80,6 +80,12 @@ if __name__ == "__main__":
 
     # --- Pre processing function setup ---------------------------------------
     p.data_augmentation = False
+
+    # FORCE rescale
+    # p.data_augmentation = True
+    # p.z_rotation = False
+    # p.rescaling = True
+
     feat_compute = get_processing_func(p, with_fn=True)
 
     # --- Dataset setup -------------------------------------------------------
@@ -191,25 +197,26 @@ if __name__ == "__main__":
                     p.test_repeat, 100*np.mean(correct_preds), loss)
                 total_cm += cm
 
+    print ""
     # === METRICS DISPLAY =====================================================
     accuracy, avg_recall, cls_recall = compute_metrics(total_cm)
-    log("Accuracy: {:.2f} / Average Recall {:.2f} \n", accuracy,
-        avg_recall)
+    print "# Accuracy: {:.2f}".format(accuracy)
+    print "# Average Recall: {:.2f}".format(avg_recall)
     for idx, cls_name in enumerate(sorted(CLASS_DICT.keys())):
         print "{:20s}:\t{:.2f}".format(cls_name, cls_recall[idx])
 
     # --- Object-level metrics ------------------------------------------------
     if p.pooling.lower() in ["singlenode", "votemaxpool"]:
         accuracy, avg_recall, cls_recall = compute_metrics(total_obj_cm)
-        log("Obj Accuracy: {:.2f} / Obj Average Recall {:.2f} \n", accuracy,
-            avg_recall)
+        print "# Obj Accuracy: {:.2f}".format(accuracy)
+        print "# Obj Average Recall: {:.2f}".format(avg_recall)
         for idx, cls_name in enumerate(sorted(CLASS_DICT.keys())):
             print "{:20s}:\t{:.2f}".format(cls_name, cls_recall[idx])
 
     if p.pooling.lower() == "votemaxpool":
         accuracy, avg_recall, cls_recall = compute_metrics(total_clust_cm)
-        log("Strongest cluster Accuracy: {:.2f} / Strongest cluster Average Recall {:.2f} \n",
-            accuracy, avg_recall)
+        print "# Strongest cluster Accuracy: {:.2f}".format(accuracy)
+        print "# Strongest cluster Average Recall: {:.2f}".format(avg_recall)
         for idx, cls_name in enumerate(sorted(CLASS_DICT.keys())):
             print "{:20s}:\t{:.2f}".format(cls_name, cls_recall[idx])
 

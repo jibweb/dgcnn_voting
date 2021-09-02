@@ -111,7 +111,16 @@ if __name__ == "__main__":
                           val_set_pct=p.val_set_pct)
 
         # --- Model Setup -----------------------------------------------------
-        model = Model()
+        batch = tf.Variable(0, trainable=False, name="step")
+        bn_momentum = tf.train.exponential_decay(
+            0.5,  # BN_INIT_DECAY
+            batch*p.batch_size,
+            float(p.decay_steps),  # BN_DECAY_DECAY_STEP
+            0.5,  # BN_DECAY_DECAY_RATE
+            staircase=True)
+        bn_decay = tf.minimum(0.99,  # BN_DECAY_CLIP,
+                              1 - bn_momentum)
+        model = Model(bn_decay=bn_decay)
 
         # --- Accuracy setup --------------------------------------------------
         with tf.variable_scope('accuracy'):
@@ -130,9 +139,8 @@ if __name__ == "__main__":
             tf.summary.scalar('avg', accuracy)
 
         # --- Optimisation Setup ----------------------------------------------
-        batch = tf.Variable(0, trainable=False, name="step")
         learning_rate = tf.train.exponential_decay(p.learning_rate,
-                                                   batch,
+                                                   batch*p.batch_size,
                                                    p.decay_steps,
                                                    p.decay_rate,
                                                    staircase=True)
