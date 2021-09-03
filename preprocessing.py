@@ -23,6 +23,7 @@ p.define("neigh_size", 100.)
 p.define("neigh_nb", 30)
 p.define("fill_neighbors_w_self", False)
 p.define("region_sample_size", 64)
+p.define("voxel_size", 0.03)
 p.define("wnormals", False)
 p.define("wregions", True)
 p.define("lrf", "PCALRF")
@@ -59,8 +60,8 @@ def neighbors_to_bias(neighbors):
 
 
 
-def graph_prepare(fn, debug, lrf_code, wnormals, no_bg, height_to_zero):
-    graph = PyGraph(debug=debug, lrf=lrf_code, wnormals=wnormals)
+def graph_prepare(fn, debug, lrf_code, voxel_size, wnormals, no_bg, height_to_zero):
+    graph = PyGraph(debug=debug, lrf=lrf_code, voxel_size=voxel_size, wnormals=wnormals)
 
     file_ext = fn[-3:].strip().lower()
     if file_ext == "ply":
@@ -77,7 +78,7 @@ def graph_prepare(fn, debug, lrf_code, wnormals, no_bg, height_to_zero):
 
 
 def graph_process(fn, p, with_fn, lrf):
-    graph = graph_prepare(fn, p.debug, lrf[p.lrf].value, p.wnormals, p.sonn_no_bg, p.height_to_zero)
+    graph = graph_prepare(fn, p.debug, lrf[p.lrf].value, p.voxel_size, p.wnormals, p.sonn_no_bg, p.height_to_zero)
     if p.data_augmentation:
         graph.data_augmentation(rescaling=p.rescaling,
                                 z_rotation=p.z_rotation,

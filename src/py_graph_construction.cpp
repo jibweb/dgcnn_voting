@@ -1083,7 +1083,7 @@ int GraphConstructor::sampleSegments(std::vector<std::vector<uint> > & neighbor_
         // Check whether the current neighbor would be part of the same projection
         bool same_proj = true;
         for (uint seg_elt : segment)
-          same_proj = same_proj && (voxels_normals[neigh_idx].dot(voxels_normals[seg_elt]) > cosf(M_PI*12.f/18.f));
+          same_proj = same_proj && (voxels_normals[neigh_idx].dot(voxels_normals[seg_elt]) > cosf(M_PI*11.f/18.f));
 
         if (!same_proj) // && pcl::getAngle3D(supervoxels_normals[supervoxel_idx], supervoxels_normals[neigh_idx], true) > 10.f)
           continue;
@@ -1108,6 +1108,17 @@ int GraphConstructor::sampleSegments(std::vector<std::vector<uint> > & neighbor_
     uint segment_pt_num = 0;
     for (auto supervoxel_idx : segment)
       segment_pt_num += supervoxels_indices[supervoxel_idx]->size();
+
+    if (segment.size() == 1) {
+      for (auto supervoxel_idx : supervoxels_adjacency[segment[0]]) {
+        for (auto supervoxel_idx2 : supervoxels_adjacency[segment[0]]) {
+          supervoxels_adjacency[supervoxel_idx].insert(supervoxel_idx2);
+          supervoxels_adjacency[supervoxel_idx2].insert(supervoxel_idx);
+        }
+      }
+
+      continue;
+    }
 
     uint min_segment_pt_num = 30;
     if (segment_pt_num < min_segment_pt_num) {

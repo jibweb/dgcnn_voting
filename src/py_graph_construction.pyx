@@ -23,7 +23,7 @@ cdef extern from "v4r_cad2real_object_classification/py_graph_construction.h":
     #     float noise_std
     #     unsigned int rotation_deg
     cdef cppclass GraphConstructor:
-        GraphConstructor(bool debug, int lrf_code, bool wnormals) except +
+        GraphConstructor(bool debug, int lrf_code, bool wnormals, float voxel_size) except +
 
         # General
         void initializePLY(string filename, bool height_to_zero)
@@ -49,8 +49,8 @@ cdef class PyGraph:
     cdef GraphConstructor*c_graph  # Hold a C++ instance which we're wrapping
     cdef bool wnormals
 
-    def __cinit__(self, debug=True, lrf=2, wnormals=False):
-        self.c_graph = new GraphConstructor(debug, lrf, wnormals)
+    def __cinit__(self, debug=True, lrf=2, voxel_size=0.03, wnormals=False):
+        self.c_graph = new GraphConstructor(debug, lrf, wnormals, voxel_size)
         self.wnormals = wnormals
 
     def initialize_from_ply(self, fn, height_to_zero=False):

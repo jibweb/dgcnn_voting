@@ -27,7 +27,6 @@ protected:
   Eigen::Vector4f centroid_;
   PointT min_pt_;
   PointT max_pt_;
-  float voxel_size_;
   uint x_voxel_num_;
   uint y_voxel_num_;
   uint z_voxel_num_;
@@ -36,6 +35,7 @@ protected:
   bool debug_;
   int lrf_code_;
   bool points_with_normals_;
+  float voxel_size_;
 
 
   void voxelSeeding(std::unordered_map<int, std::tuple<uint, uint, float, Eigen::Vector3f> > & voxels_map,
@@ -93,17 +93,18 @@ protected:
 
 public:
 
-  GraphConstructor(bool debug, int lrf, bool wnormals) :
+  GraphConstructor(bool debug, int lrf, bool wnormals, float voxel_size) :
     pc_(new pcl::PointCloud<PointT>),
     debug_(debug),
     lrf_code_(lrf),
-    points_with_normals_(wnormals) {
+    points_with_normals_(wnormals),
+    voxel_size_(voxel_size) {
       if (!debug_)
         pcl::console::setVerbosityLevel(pcl::console::L_ALWAYS);
       else
         std::cout << "lrf_code: " << lrf << std::endl;
 
-      voxel_size_ = 0.04f;
+      // voxel_size_ = 0.04f;
   }
 
   // Initialization
