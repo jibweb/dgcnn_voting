@@ -159,10 +159,19 @@ class EdgeConv(Model):
         rel_position = neigh_pos - central_pos
 
         if p.with_rescaled_pos:
-            scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
-            scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
-            scales += 1e-5
-            rel_position *= scales
+            if p.direction_only:
+                norms = tf.linalg.norm(rel_position, axis=3)
+                norms = tf.reshape(norms, [-1, p.max_support_point, p.neigh_nb, 1])
+                norms = tf.tile(norms, [1, 1, 1, 3])
+                cond = tf.less(norms, tf.ones(tf.shape(norms))*0.05)
+                norms = tf.where(cond, tf.ones(tf.shape(norms)), norms)
+                # norms += 1e-5
+                rel_position /= norms
+            else:
+                scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
+                scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
+                scales += 1e-5
+                rel_position *= scales
 
         if p.with_rel_scales:
             neigh_scales, central_scales = get_rel_features(
@@ -190,25 +199,9 @@ class EdgeConv(Model):
         feats_combi = local_feats
         print "feats_combi/IN:",  feats_combi.get_shape()
 
-        # neigh_pos, central_pos = get_rel_features(
-        #     tf.reshape(self.support_pts, [-1, p.max_support_point, 1, 3]),
-        #     nn_idx=self.neighbor_indices, k=p.neigh_nb)
-        # rel_position = neigh_pos - central_pos
-
-        # if p.with_rel_scales:
-        #     neigh_scales, central_scales = get_rel_features(
-        #         tf.reshape(self.scales, [-1, p.max_support_point, 1, 1]),
-        #         nn_idx=self.neighbor_indices, k=p.neigh_nb)
-        #     central_scales += 1e-5
-        #     rel_scales = neigh_scales / central_scales
-
-        # if p.with_rescaled_pos:
-        #     scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
-        #     scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])
-        #     scales += 1e-5
-        #     rel_position /= scales
-
         nn_idx = self.neighbor_indices
+        valid_pts = tf.reshape(tf.cast(self.valid_pts, tf.bool),
+                               [-1, p.max_support_point, 1, 1])
         relative_features = self.get_relative_features(nn_idx)
         multiscale_feats = []
 
@@ -234,11 +227,37 @@ class EdgeConv(Model):
                     multiscale_feats.append(feats_combi)
 
                     if self.dynamic_graph:
+                        # Fill the point cloud such that invalid
+                        # points are far away
+                        valid_pt_cloud = tf.where(
+                            tf.tile(valid_pts,
+                                [1, 1, 1, p.feats_combi_layers[i]]),
+                            feats_combi,
+                            1e6*tf.ones(tf.shape(feats_combi)))
                         adj_matrix = pairwise_distance(
-                            tf.reshape(feats_combi,
+                            tf.reshape(valid_pt_cloud,
                                        [-1, p.max_support_point,
                                         p.feats_combi_layers[i]]))
                         nn_idx = knn(adj_matrix, k=p.neigh_nb)
+
+                        # Filter the resulting neighbors such that invalid
+                        # neighbors are replaced by self indices
+                        idx_ = tf.range(p.batch_size) * p.max_support_point
+                        idx_ = tf.reshape(idx_, [p.batch_size, 1, 1])
+                        mask = tf.gather(tf.reshape(valid_pts, [-1, 1]),
+                                         nn_idx+idx_)
+                        self_idx = tf.reshape(tf.range(p.max_support_point),
+                                              [1, p.max_support_point, 1])
+                        self_idx = tf.tile(self_idx,
+                                           [p.batch_size, 1, p.neigh_nb])
+
+                        nn_idx = tf.where(
+                            tf.reshape(mask,
+                                [-1, p.max_support_point, p.neigh_nb]),
+                            nn_idx, self_idx)
+                        print "nn_idx", nn_idx.get_shape()
+                        print "GATHER", mask.get_shape()
+
                         relative_features = self.get_relative_features(nn_idx)
 
         feats_combi = conv2d_bn(tf.concat(multiscale_feats, axis=-1), 1024,
