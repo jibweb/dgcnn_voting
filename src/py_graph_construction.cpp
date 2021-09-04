@@ -260,7 +260,7 @@ void GraphConstructor::initializeArray(float* vertices, uint vertex_nb,
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void GraphConstructor::dataAugmentation(bool rescaling, bool z_rotation, bool normal_smoothing,
+void GraphConstructor::dataAugmentation(bool rescaling, bool z_rotation, float point_jitter, bool normal_smoothing,
                                         float normal_occlusion, float normal_noise) {
   ScopeTime t("Data Augmentation", debug_);
 
@@ -292,6 +292,21 @@ void GraphConstructor::dataAugmentation(bool rescaling, bool z_rotation, bool no
 
     pcl::transformPointCloudWithNormals(*pc_, *pc_, rotation_z);
   }
+
+  if (point_jitter > 0.f) {
+    // Define random generator with Gaussian distribution
+    const float mean = 0.0;
+    // const float stddev = 0.01;
+    std::default_random_engine generator;
+    std::normal_distribution<float> dist(mean, point_jitter);
+
+    for (uint pt_idx=0; pt_idx<pc_->points.size(); pt_idx++) {
+      pc_->points[pt_idx].x += std::max(std::min(dist(generator), 0.05f), -0.05f);
+      pc_->points[pt_idx].y += std::max(std::min(dist(generator), 0.05f), -0.05f);
+      pc_->points[pt_idx].z += std::max(std::min(dist(generator), 0.05f), -0.05f);
+    }
+  }
+
 
   if (normal_smoothing)
     normalSmoothing();

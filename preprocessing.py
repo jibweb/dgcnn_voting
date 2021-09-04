@@ -42,6 +42,7 @@ p.define("normal_smoothing", False)
 p.define("normal_occlusion", -2.)
 p.define("rescaling", False)
 p.define("z_rotation", False)
+p.define("point_jitter", 0.)
 
 p.define("debug", False)
 
@@ -82,6 +83,7 @@ def graph_process(fn, p, with_fn, lrf):
     if p.data_augmentation:
         graph.data_augmentation(rescaling=p.rescaling,
                                 z_rotation=p.z_rotation,
+                                point_jitter=p.point_jitter,
                                 normal_smoothing=p.normal_smoothing,
                                 normal_occlusion=p.normal_occlusion,
                                 normal_noise=p.normal_noise)
