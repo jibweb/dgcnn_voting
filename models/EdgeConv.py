@@ -166,7 +166,7 @@ class EdgeConv(Model):
                 cond = tf.less(norms, tf.ones(tf.shape(norms))*0.05)
                 norms = tf.where(cond, tf.ones(tf.shape(norms)), norms)
                 # norms += 1e-5
-                rel_position /= norms
+                # rel_position /= norms
             else:
                 scales = tf.reshape(self.scales, [-1, p.max_support_point, 1, 1])
                 scales = tf.tile(scales, [1, 1, p.neigh_nb, 1])

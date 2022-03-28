@@ -64,7 +64,7 @@ def create_hdf5(fns, labels, dataset_name, rescaling=False, random_orientation=F
 
 
 def create_h5(dataset_to_load, dataset_basename, skip_train=False, rescaling=False, random_orientation=False, scale_from_file=False, sonn_with_bg=False):
-    file_length = 2048
+    file_length = 20048
     # Create the HDF5 files for the train set
 
     Dataset, CLASS_DICT = get_dataset(dataset_to_load)
@@ -132,12 +132,12 @@ def create_h5(dataset_to_load, dataset_basename, skip_train=False, rescaling=Fal
 
 
 if __name__ == "__main__":
-    dataset_to_h5 = "ScanObjectNNToModelNet"
-    sonn_with_bg = True
-    rescaling = False
-    skip_train = True
+    dataset_to_h5 = "ScanObjectNN_T50_RSToModelNet"
+    sonn_with_bg = True 
+    rescaling = True
+    skip_train = True 
 
-    dataset_savename = [dataset_to_h5]
+    dataset_savename = [dataset_to_h5, "AIO"]
     if sonn_with_bg:
         dataset_savename.append("w_bg")
     if rescaling:

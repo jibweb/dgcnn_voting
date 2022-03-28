@@ -189,7 +189,8 @@ class Model(object):
             elif self.pooling_block == POOLING_BLOCK.VoteMaxPool:
                 with tf.variable_scope('vote'):
                     pooling_feats = tf.reshape(pooling_feats,
-                                               [-1, p.feats_combi_layers[-1]])
+                                               [-1, 1024])
+                                               # [-1, p.feats_combi_layers[-1]])
                     scales = tf.reshape(self.scales, [-1, 1])
                     vote_xyz, vote_feats = voting_module_simple(
                         self.support_pts,
@@ -219,7 +220,8 @@ class Model(object):
                 with tf.variable_scope('maxpool'):
                     feats_obj = tf.reshape(vote_feats,
                                            [-1, p.max_support_point,
-                                            p.feats_combi_layers[-1]])
+                                            1024])
+                                            # p.feats_combi_layers[-1]])
 
                     # Zeroing-out the features of the invalid points
                     feats_obj = tf.multiply(feats_obj, self.valid_pts)
@@ -246,7 +248,7 @@ class Model(object):
                     pooling_feats = tf.reduce_max(grouped_feats, axis=2,
                                                   name='max_in_cluster')
                     pooling_feats = tf.reshape(pooling_feats,
-                                               [-1, p.feats_combi_layers[-1]])
+                                               [-1, 1024])  # p.feats_combi_layers[-1]])
 
                 if p.with_bbox:
                     with tf.variable_scope('bbox'):

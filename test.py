@@ -7,6 +7,7 @@ import os
 from sklearn.metrics import confusion_matrix
 import sys
 import tensorflow as tf
+import time
 
 from dataset import get_dataset, DATASETS
 from models import get_model
@@ -93,6 +94,8 @@ if __name__ == "__main__":
         p.test_dataset = p.dataset
 
     Dataset, CLASS_DICT = get_dataset(p.test_dataset)
+    p.batch_size = 1
+
     dataset = Dataset(batch_size=p.batch_size,
                       val_set_pct=p.val_set_pct)
 
@@ -132,11 +135,14 @@ if __name__ == "__main__":
                         feed_dict=model.get_feed_dict(xs, ys,
                                                       is_training=False))
                 else:
+                    time0 = time.time()
                     preds, loss = sess.run(
                         [model.inference,
                          model.loss],
                         feed_dict=model.get_feed_dict(xs, ys,
                                                       is_training=False))
+                    print("Time:", time.time()-time0)
+
 
                     if "singlenode" == p.pooling.lower():
                         ys = np.array([val for val in ys for i in range(p.max_support_point)])
